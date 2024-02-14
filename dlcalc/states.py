@@ -2,8 +2,8 @@ import dataclasses
 from enum import Enum
 
 from dlcalc.utils.math import safe_divide
-from ...utils.size import Size
-from ...utils.configurations import ActivationCheckpointingType
+from .utils.size import Size
+from .utils.configurations import ActivationCheckpointingType
 
 
 @dataclasses.dataclass

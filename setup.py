@@ -6,7 +6,7 @@ setuptools.setup(
     packages=["dlcalc"],
     entry_points={
         "console_scripts": [
-            "3dtraining = dlcalc.3d_training_memory:main",
+            "3dmem = dlcalc.3d_training_memory:main",
         ],
     },
 )

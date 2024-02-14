@@ -2,7 +2,7 @@
 
 from argparse import ArgumentParser
 
-from .memory.threed.states import States, ThreeDParallelModel, ParallelismConfig
+from .states import States, ThreeDParallelModel, ParallelismConfig
 from .utils.configurations import ActivationCheckpointingType
 
 

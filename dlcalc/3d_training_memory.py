@@ -2,7 +2,7 @@
 
 from argparse import ArgumentParser
 
-from dlcalc.memory.threed.states import States, ThreeDParallelModel, ParallelismConfig
+from dlcalc.states import States, ThreeDParallelModel, ParallelismConfig
 from dlcalc.utils.configurations import ActivationCheckpointingType
 
 
@@ -19,11 +19,23 @@ def main() -> None:
 
     parser.add_argument("-s", "--sequence-len", type=int, required=True)
     parser.add_argument("-b", "--microbatch-sz", type=int, required=True)
-    parser.add_argument("--tp", type=int, required=True)
-    parser.add_argument("--pp", type=int, required=True)
-    parser.add_argument("--dp", type=int, required=True)
+    parser.add_argument(
+        "--tp", type=int, required=True, help="tensor model parallel (TP) degree"
+    )
+    parser.add_argument(
+        "--pp", type=int, required=True, help="pipeline model parallel (PP) degree"
+    )
+    parser.add_argument(
+        "--dp", type=int, required=True, help="data parallel (DP) degree"
+    )
     parser.add_argument("--sequence-parallel", action="store_true")
-    parser.add_argument("--zero-level", type=int, required=True)
+    parser.add_argument(
+        "--zero-level",
+        type=int,
+        required=True,
+        choices=[0, 1, 2, 3],
+        help="ZeRO partitioning level",
+    )
     parser.add_argument(
         "--activation-checkpointing-type",
         choices=["none", "full", "selective"],
@@ -75,11 +87,15 @@ def main() -> None:
     # activations
     print("TRAINING ACTIVATIONS:")
     print("--------------------------------------------------------------------------")
-    per_microbatch_per_layer_per_inflight = model_def.activation_size_per_microbatch_per_layer()
+    per_microbatch_per_layer_per_inflight = (
+        model_def.activation_size_per_microbatch_per_layer()
+    )
     print("act/layer/inflight_ubatch:", per_microbatch_per_layer_per_inflight)
 
     max_inflight_microbatches = pp_sz  # TODO.
-    per_microbatch_per_layer = per_microbatch_per_layer_per_inflight * max_inflight_microbatches
+    per_microbatch_per_layer = (
+        per_microbatch_per_layer_per_inflight * max_inflight_microbatches
+    )
     print("act/layer:", per_microbatch_per_layer)
 
     layers_per_pp_stage = model_def.layers_per_pp_stage()

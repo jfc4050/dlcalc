@@ -1,4 +1,4 @@
-from dlcalc.memory.threed.states import States, Zero3Model
+from dlcalc.states import States, Zero3Model
 
 actor_n_params = 7 * 1e9
 critic_n_params = 1.1 * 1e9
