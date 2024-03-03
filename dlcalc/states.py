@@ -18,12 +18,15 @@ class ParallelismConfig:
     pp: int
     dp: int
 
+    # virtual pipeline parallel degree
+    vpp: int
+
     sp_enabled: bool
 
     zero_level: ZeroLevel
 
     def mp_degree(self) -> int:
-        return self.pp * self.pp
+        return self.tp * self.pp
 
     def world_size(self) -> int:
         return self.tp * self.pp * self.dp
@@ -41,6 +44,32 @@ class Zero3Model:
         return self.n_params / self.world_size
 
 
+class States:
+    def __init__(self, params: Size, grads: Size, optim_states: Size) -> None:
+        self.params = params
+        self.grads = grads
+        self.optim_states = optim_states
+
+    def total_bytes(self) -> int:
+        return sum(
+            [
+                self.params.bytes(),
+                self.grads.bytes() if self.grads is not None else 0,
+                self.optim_states.bytes() if self.optim_states is not None else 0,
+            ]
+        )
+
+    def __repr__(self) -> str:
+        return "\n".join(
+            [
+                f"params       : {self.params}",
+                f"grads        : {self.grads}",
+                f"optim_states : {self.optim_states}",
+                f"TOTAL        : {self.total_bytes() / (1024 ** 3):.2f}GiB",
+            ]
+        )
+
+
 @dataclasses.dataclass
 class ThreeDParallelModel:
     """
@@ -51,21 +80,73 @@ class ThreeDParallelModel:
     https://gist.github.com/Quentin-Anthony/f43939791a7ceb0b01a4937308317be5
     """
 
-    n_params: int
     parallelism_cfg: ParallelismConfig
+    n_params: int
 
     sequence_len: int
     microbatch_sz: int
+
     hidden_sz: int
 
     n_layers: int
-    n_kv_heads: int
+
+    n_q_heads: int
+    n_kv_heads: int  # num_query_groups if GQA
     head_dim: int
+
+    inter_sz: int
+    glu: bool
+
+    vocab_sz: int
 
     activation_checkpointing_type: ActivationCheckpointingType
 
     # TODO. assuming mixed precision here.
     bytes_per_parameter: int = 2
+
+    def get_transformer_block_n_params(self) -> int:
+        numel = sum(
+            [
+                # qkv_proj (col parallel)
+                self.hidden_sz
+                * ((self.n_q_heads + 2 * self.n_kv_heads) * self.head_dim),
+                # attn out_proj (row parallel)
+                self.hidden_sz * self.hidden_sz,
+                # MLP layer 1 (col parallel)
+                self.hidden_sz * ((self.inter_sz * 2) if self.glu else self.inter_sz),
+                # MLP layer 2 (row parallel)
+                self.inter_sz * self.hidden_sz,
+            ]
+        ) / self.parallelism_cfg.tp
+
+        return Size(numel=numel, bytes_per_element=self.bytes_per_parameter)
+
+    def get_embedding_or_lm_head_n_params(self) -> int:
+        return Size(
+            numel=self.hidden_sz * self.vocab_sz / self.parallelism_cfg.tp,
+            bytes_per_element=self.bytes_per_parameter,
+        )
+
+    def get_states(self, training: bool) -> States:
+        return States(
+            params=Size(
+                numel=self.__param_numel_per_mp_rank(),
+                bytes_per_element=self.bytes_per_parameter,
+            ),
+            grads=Size(
+                numel=self.__grad_numel_per_mp_rank(),
+                bytes_per_element=self.bytes_per_parameter,
+            )
+            if training
+            else None,
+            optim_states=Size(
+                numel=self.__optim_states_numel_per_mp_rank(),
+                # TODO. assuming AMP here.
+                bytes_per_element=4,
+            )
+            if training
+            else None,
+        )
 
     def activation_size_per_microbatch_per_layer(self) -> Size:
         # TODO. assuming half precision here.
@@ -73,6 +154,16 @@ class ThreeDParallelModel:
             numel=self.__activation_numel_per_microbatch_per_layer(),
             bytes_per_element=self.bytes_per_parameter,
         )
+
+    def max_inflight_microbatches(self) -> int:
+        if self.parallelism_cfg.vpp > 1:
+            # TODO. need to understand this VPP penalty better
+            interleaved_schedule_mem_penalty = 1 + (self.parallelism_cfg.pp - 1) / (
+                self.parallelism_cfg.pp * self.parallelism_cfg.vpp
+            )
+            return interleaved_schedule_mem_penalty * self.parallelism_cfg.pp
+        else:
+            return self.parallelism_cfg.pp
 
     def kv_cache_size(self, gen_batch_sz: int) -> Size:
         return Size(
@@ -93,32 +184,49 @@ class ThreeDParallelModel:
         See: Reducing Activation Recomputation in Large Transformer Models
         https://arxiv.org/pdf/2205.05198.pdf
         """
-
-        inter_sz = self.hidden_sz * 4  # TODO. hardcoding this for now
+        sp = self.parallelism_cfg.sp_enabled
 
         sbh = self.sequence_len * self.microbatch_sz * self.hidden_sz
-        sbi = self.sequence_len * self.microbatch_sz * inter_sz
+        sbi = self.sequence_len * self.microbatch_sz * self.inter_sz
 
         if self.activation_checkpointing_type == ActivationCheckpointingType.FULL:
-            return sbh  # just the block input
+            # just the block input
+            return safe_divide(sbh, self.parallelism_cfg.tp) if sp else sbh
         elif (
             self.activation_checkpointing_type == ActivationCheckpointingType.SELECTIVE
         ):
-            if self.parallelism_cfg.sp_enabled:
-                return sbh * 17 / self.parallelism_cfg.tp
-            else:
-                return sbh * (5 + 12 / self.parallelism_cfg.tp)
-        elif self.activation_checkpointing_type == ActivationCheckpointingType.NONE:
+            sp = self.parallelism_cfg.sp_enabled
             return sum(
                 [
                     # LAYERNORM 1
-                    sbh,  # layernorm 2 input
+                    safe_divide(sbh, self.parallelism_cfg.tp) if sp else sbh,  # input
                     # ATTENTION
                     sbh,  # QKV matmul input
                     # skipping Q @ K.T (checkpointed by FlashAttention)
                     # skipping Softmax (checkpointed by FlashAttention)
                     # skipping Softmax dropout (checkpointed by FlashAttention)
-                    sbh,  # attention over values.
+                    safe_divide(sbh, self.parallelism_cfg.tp),  # down proj input.
+                    # LAYERNORM 2
+                    sbh,  # layernorm 2 input
+                    # MLP
+                    sbh,  # up/gate input
+                    safe_divide(sbi, self.parallelism_cfg.tp),  # activation input
+                    safe_divide(sbi, self.parallelism_cfg.tp),  # down input
+                    safe_divide(sbh, 2),  # dropout mask
+                    # TODO. this is sort of hacky, dropout mask is 1 byte so setting as half numel
+                ]
+            )
+        elif self.activation_checkpointing_type == ActivationCheckpointingType.NONE:
+            return sum(
+                [
+                    # LAYERNORM 1
+                    sbh,  # layernorm 1 input
+                    # ATTENTION
+                    sbh,  # QKV matmul input
+                    # skipping Q @ K.T (checkpointed by FlashAttention)
+                    # skipping Softmax (checkpointed by FlashAttention)
+                    # skipping Softmax dropout (checkpointed by FlashAttention)
+                    sbh,  # down proj input.
                     # LAYERNORM 2
                     sbh,  # layernorm 2 input
                     # MLP
@@ -134,133 +242,31 @@ class ThreeDParallelModel:
                 f"unhandled checkpointing_type={self.activation_checkpointing_type}"
             )
 
-
-class States:
-    def __init__(self, params: Size, grads: Size, optim_states: Size) -> None:
-        self.params = params
-        self.grads = grads
-        self.optim_states = optim_states
-
-    @staticmethod
-    def for_frozen_zero3_half_precision(model: Zero3Model) -> "States":
-        return States(
-            params=Size(
-                numel=model.params_per_rank(),
-                bytes_per_element=model.bytes_per_parameter,
-            ),
-            grads=None,
-            optim_states=None,
-        )
-
-    @staticmethod
-    def for_unfrozen_zero3_half_precision(model: Zero3Model) -> "States":
-        return States(
-            params=Size(
-                numel=model.params_per_rank(),
-                bytes_per_element=model.bytes_per_parameter,
-            ),
-            grads=Size(
-                numel=model.params_per_rank(),
-                bytes_per_element=model.bytes_per_parameter,
-            ),
-            optim_states=Size(
-                numel=3 * model.params_per_rank(),
-                # TODO. assuming AMP here.
-                bytes_per_element=4,
-            ),
-        )
-
-    @staticmethod
-    def for_frozen_3d_half_precision(model: ThreeDParallelModel) -> "States":
-        return States(
-            params=Size(
-                numel=__class__.__param_numel_per_mp_rank(model),
-                bytes_per_element=model.bytes_per_parameter,
-            ),
-            grads=None,
-            optim_states=None,
-        )
-
-    @staticmethod
-    def for_unfrozen_3d_mixed_precision(model: ThreeDParallelModel) -> "States":
-        return States(
-            params=Size(
-                numel=__class__.__param_numel_per_mp_rank(model),
-                bytes_per_element=model.bytes_per_parameter,
-            ),
-            grads=Size(
-                numel=__class__.__grad_numel_per_mp_rank(model),
-                bytes_per_element=model.bytes_per_parameter,
-            ),
-            optim_states=Size(
-                numel=__class__.__optim_states_numel_per_mp_rank(model),
-                # TODO. assuming AMP here.
-                bytes_per_element=4,
-            ),
-        )
-
-    def total_bytes(self) -> int:
-        return sum(
-            [
-                self.params.bytes(),
-                self.grads.bytes() if self.grads is not None else 0,
-                self.optim_states.bytes() if self.optim_states is not None else 0,
-            ]
-        )
-
-    def __repr__(self) -> str:
-        return "\n".join(
-            [
-                f"params       : {self.params}",
-                f"grads        : {self.grads}",
-                f"optim_states : {self.optim_states}",
-                f"TOTAL        : {self.total_bytes() / (1024 ** 3):.2f}GB"
-            ]
-        )
-
-    @staticmethod
-    def __param_numel_per_mp_rank(model: ThreeDParallelModel) -> int:
+    def __param_numel_per_mp_rank(self) -> int:
         """parameters are partitioned with tensor and pipeline parallelism. note this is
         an approximation. not all parameters are evenly partitioned."""
         if (
-            model.parallelism_cfg.zero_level
+            self.parallelism_cfg.zero_level
             >= ParallelismConfig.ZeroLevel.PARTITION_PARAMETERS
         ):
             raise NotImplementedError
 
-        return model.n_params / model.parallelism_cfg.mp_degree()
+        return self.n_params / self.parallelism_cfg.mp_degree()
 
-    @staticmethod
-    def __grad_numel_per_mp_rank(model: ThreeDParallelModel) -> int:
+    def __grad_numel_per_mp_rank(self) -> int:
         """gradients are not partitioned by TP.
 
         see: https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
         """
         if (
-            model.parallelism_cfg.zero_level
+            self.parallelism_cfg.zero_level
             < ParallelismConfig.ZeroLevel.PARTITION_GRADIENTS
         ):
-            return model.n_params / model.parallelism_cfg.mp_degree()
+            return self.n_params / self.parallelism_cfg.mp_degree()
         else:
-            if model.parallelism_cfg.pp > 1:
-                raise RuntimeError(
-                    "While it's theoretically possible to use ZeRO stage 2 with "
-                    "Pipeline Parallelism, it will have bad performance impacts. "
-                    "There would need to be an additional reduce-scatter collective "
-                    "for every micro-batch to aggregate the gradients "
-                    "before sharding, which adds a potentially significant communication overhead. "
-                    "By nature of Pipeline Parallelism, small micro-batches are used and instead "
-                    "the focus is on trying to balance arithmetic intensity (micro-batch size) "
-                    "with minimizing the Pipeline bubble (number of micro-batches). "
-                    "Therefore those communication costs are going to hurt."
-                )
+            return self.n_params / self.parallelism_cfg.world_size()
 
-            return model.n_params / model.parallelism_cfg.world_size()
-
-    @staticmethod
-    def __optim_states_numel_per_mp_rank(
-        model: ThreeDParallelModel,
-    ) -> int:
+    def __optim_states_numel_per_mp_rank(self) -> int:
         """here we assume Adam, that is three optimizer states per parameter -
         (param, momentum, variance)
 
@@ -269,11 +275,16 @@ class States:
 
         also see https://github.com/NVIDIA/Megatron-LM?tab=readme-ov-file#distributed-optimizer
         """
-        numel_unpartitioned_adam = model.n_params * 3
+        numel_unpartitioned_adam = self.n_params * 3
         if (
-            model.parallelism_cfg.zero_level
+            self.parallelism_cfg.zero_level
             < ParallelismConfig.ZeroLevel.PARTITION_OPTIMIZER
         ):
-            return numel_unpartitioned_adam / model.parallelism_cfg.mp_degree()
+            return numel_unpartitioned_adam / self.parallelism_cfg.mp_degree()
         else:
-            return numel_unpartitioned_adam / model.parallelism_cfg.world_size()
+            return (
+                # fp32 optimizer state
+                self.n_params / self.parallelism_cfg.mp_degree()
+                # momentum + variance
+                + 2 * self.n_params / self.parallelism_cfg.world_size()
+            )

@@ -21,7 +21,7 @@ class Size:
         return Size(self._numel * multiplicand, self._bytes_per_element)
 
     def __repr__(self) -> str:
-        return f"numel: {self._numel * 1e-9:.2f}B, bytes: {self._numel * self._bytes_per_element / 1024 ** 3:.2f}GB"
+        return f"numel: {self._numel * 1e-9:.2f}B, bytes: {self._numel * self._bytes_per_element / 1024 ** 3:.2f}GiB"
 
     def bytes(self) -> int:
         return self._numel * self._bytes_per_element
