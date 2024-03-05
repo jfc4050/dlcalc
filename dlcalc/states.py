@@ -14,14 +14,13 @@ class ParallelismConfig:
         PARTITION_GRADIENTS = 2
         PARTITION_PARAMETERS = 3
 
-    tp: int
-    pp: int
-    dp: int
+    tp: int  # tensor parallel degree
+    pp: int  # pipeline parallel degree
+    dp: int  # data parallel degree
 
-    # virtual pipeline parallel degree
-    vpp: int
+    vpp: int  # virtual pipeline parallel degree
 
-    sp_enabled: bool
+    sp_enabled: bool  # sequence parallel
 
     zero_level: ZeroLevel
 
