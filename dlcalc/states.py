@@ -176,14 +176,14 @@ class ThreeDParallelModel:
         )
 
     def max_inflight_microbatches(self) -> int:
-        if self.parallelism_cfg.vpp > 1:
-            # TODO. need to understand this VPP penalty better
-            interleaved_schedule_mem_penalty = 1 + (self.parallelism_cfg.pp - 1) / (
-                self.parallelism_cfg.pp * self.parallelism_cfg.vpp
-            )
-            return interleaved_schedule_mem_penalty * self.parallelism_cfg.pp
-        else:
-            return self.parallelism_cfg.pp
+        return self.parallelism_cfg.pp
+
+    def vpp_penalty(self) -> int:
+        """interleaved schedule requires storing activations for (1 + (p - 1)/pm)
+        more layers."""
+        return 1 + (self.parallelism_cfg.pp - 1) / (
+            self.parallelism_cfg.pp * self.parallelism_cfg.vpp
+        )
 
     def kv_cache_size(self, gen_batch_sz: int) -> Size:
         return Size(
@@ -264,8 +264,7 @@ class ThreeDParallelModel:
                 self.__sp_partition_if_applicable(0.5 * sbh),  # dropout mask
                 # -  output deallocated: residual doesn't need to store
                 # RESIDUAL
-                # needed by layernorm2, residual2
-                self.__sp_partition_if_applicable(sbh),
+                self.__sp_partition_if_applicable(sbh),  # needed by norm2, resid2
                 # LAYERNORM 2
                 self.__sp_partition_if_applicable(sbh),  # up/gate input
                 # MLP UP/GATE (col parallel linear)
@@ -284,6 +283,7 @@ class ThreeDParallelModel:
                 self.__sp_partition_if_applicable(sbh),
             )
         elif self.act_ckpting_type == ActivationCheckpointingType.NONE:
+            raise NotImplementedError("not yet implemented")
             return _sum(
                 # LAYERNORM 1
                 sbh,  # layernorm 1 input

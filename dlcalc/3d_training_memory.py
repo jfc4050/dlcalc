@@ -1,6 +1,7 @@
 """CLI tool for various deep learning estimations."""
 
 from argparse import ArgumentParser
+import math
 
 from dlcalc.states import ThreeDParallelModel, ParallelismConfig
 from dlcalc.utils.configurations import ActivationCheckpointingType
@@ -138,16 +139,29 @@ def main() -> None:
     # activations
     print("TRAINING ACTIVATIONS:")
     print("--------------------------------------------------------------------------")
-    per_microbatch_per_layer_per_inflight = model_def.activation_size_per_microbatch_per_layer()
+    per_microbatch_per_layer_per_inflight = (
+        model_def.activation_size_per_microbatch_per_layer()
+    )
     print("act/layer/inflight:", per_microbatch_per_layer_per_inflight)
     max_inflight_microbatches = model_def.max_inflight_microbatches()
     layers_per_pp_stage = model_def.layers_per_pp_stage()
+    vpp_penalty = model_def.vpp_penalty()
+    act_memory = (
+        per_microbatch_per_layer_per_inflight
+        * max_inflight_microbatches
+        * math.ceil(vpp_penalty * layers_per_pp_stage)
+    )
     print(
         f"act/pp_stage = "
         f"{per_microbatch_per_layer_per_inflight} * "
         f"{max_inflight_microbatches} * "
-        f"{layers_per_pp_stage} = "
-        f"{per_microbatch_per_layer_per_inflight * max_inflight_microbatches * layers_per_pp_stage}")
+        f"{math.ceil(vpp_penalty * layers_per_pp_stage)} = "
+        f"{act_memory}"
+    )
+
+    print(
+        f"total mem (GiB) = {(states.total_bytes() + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
+    )
 
 
 if __name__ == "__main__":
