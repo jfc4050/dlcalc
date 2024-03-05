@@ -106,6 +106,8 @@ class ThreeDParallelModel:
 
     # TODO. assuming mixed precision here.
     bytes_per_parameter: int = 2
+    bytes_per_grad: int = 4
+    bytes_per_optim_state: int = 4
 
     def get_transformer_block_n_params(self) -> int:
         numel = _sum(
@@ -140,19 +142,23 @@ class ThreeDParallelModel:
             params_in_most_loaded_pp_stage / self.parallelism_cfg.tp
         )
 
+        if self.parallelism_cfg.zero_level != ParallelismConfig.ZeroLevel.PARTITION_GRADIENTS:
+            raise NotImplementedError
+
         return States(
             params=Size(
                 numel=tp_params_most_loaded_pp_stage,
                 bytes_per_element=self.bytes_per_parameter,
             ),
+            # for gradient and optimizer partitioning, see
+            # https://github.com/NVIDIA/apex/blob/master/apex/contrib/optimizers/distributed_fused_adam.py
+            # https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
             grads=Size(
                 numel=tp_params_most_loaded_pp_stage,
-                bytes_per_element=self.bytes_per_parameter,
+                bytes_per_element=self.bytes_per_grad / self.parallelism_cfg.dp,
             )
             if training
             else None,
-            # see:
-            # https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
             optim_states=Size(
                 numel=(
                     # fp32 params
@@ -161,8 +167,7 @@ class ThreeDParallelModel:
                     # momentum/variance
                     2 * tp_params_most_loaded_pp_stage / self.parallelism_cfg.dp
                 ),
-                # TODO. assuming AMP here.
-                bytes_per_element=4,
+                bytes_per_element=self.bytes_per_optim_state,
             )
             if training
             else None,

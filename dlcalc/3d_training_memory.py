@@ -130,7 +130,7 @@ def main() -> None:
         ),
     )
 
-    print("STATICS")
+    print("STATES")
     print("--------------------------------------------------------------------------")
     states = model_def.get_states(training=True)
     print(states)
@@ -158,10 +158,14 @@ def main() -> None:
         f"{math.ceil(vpp_penalty * layers_per_pp_stage)} = "
         f"{act_memory}"
     )
+    print()
 
+    print("TOTAL:")
+    print("--------------------------------------------------------------------------")
     print(
         f"total mem (GiB) = {(states.total_bytes() + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
     )
+    print()
 
 
 if __name__ == "__main__":
