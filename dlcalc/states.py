@@ -215,7 +215,7 @@ class ThreeDParallelModel:
         sbkv = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
 
         if self.act_ckpting_type == ActivationCheckpointingType.FULL:
-            return self.__sp_partition_if_applicable(sbh)  # just the block input
+            return self.__sp_partition_if_on(sbh)  # just the block input
         elif self.act_ckpting_type == ActivationCheckpointingType.SUPER_SELECTIVE:
             return _sum(
                 # LAYERNORM 1
@@ -225,17 +225,15 @@ class ThreeDParallelModel:
                 self.__tp_partition(sbkv),  # K - attn input
                 self.__tp_partition(sbkv),  # V - attn input
                 # SELF ATTENTION
-                # - skipping Q @ K.T (checkpointed by FlashAttention)
-                # - skipping Softmax (checkpointed by FlashAttention)
-                # - skipping Softmax dropout (checkpointed by FlashAttention)
+                # - skipping intermediates (checkpointed by FlashAttention)
                 self.__tp_partition(sbh),  # attn output
                 # DOWN PROJ
-                # - deallocated (dropout doesn't need to store)
+                # - output deallocated (dropout doesn't need to store)
                 # DROPOUT
                 # - dropout mask recomputed
                 # - deallocated - residual doesn't need to store
                 # RESIDUAL
-                self.__sp_partition_if_applicable(sbh),  # stored by norm2, residual2
+                self.__sp_partition_if_on(sbh),  # stored by norm2, residual2
                 # LAYERNORM 2
                 # output is recomputed
                 # MLP UP/GATE (col parallel linear)
@@ -243,49 +241,46 @@ class ThreeDParallelModel:
                 # SwiGLU
                 # - output is recomputed
                 # MLP DOWN (row parallel linear)
-                self.__sp_partition_if_applicable(sbh),  # TODO. why not deallocated?
+                # - output deallocated - dropout doesn't need to store
                 # DROPOUT
                 # - dropout mask recomputed
                 # - output deallocated - residual doesn't need to store
                 # RESIDUAL
-                self.__sp_partition_if_applicable(sbh),  # for by next norm1, residual1
+                self.__sp_partition_if_on(sbh),  # needed by next norm1, residual1
             )
         elif self.act_ckpting_type == ActivationCheckpointingType.SELECTIVE:
             return _sum(
                 # LAYERNORM 1
-                self.__sp_partition_if_applicable(sbh),  # output - QKV input
+                self.__sp_partition_if_on(sbh),  # output - QKV input
                 # QKV PROJ (col parallel linear)
                 self.__tp_partition(sbq),  # Q - attn input
                 self.__tp_partition(sbkv),  # K - attn input
                 self.__tp_partition(sbkv),  # V - attn input
                 # SELF ATTENTION
-                # skipping Q @ K.T (checkpointed by FlashAttention)
-                # skipping Softmax (checkpointed by FlashAttention)
-                # skipping Softmax dropout (checkpointed by FlashAttention)
+                # - skipping intermediates (checkpointed by FlashAttention)
                 self.__tp_partition(sbh),  # needed by down proj
                 # DOWN PROJ
                 # - deallocated (dropout doesn't need to store)
                 # DROPOUT
-                self.__sp_partition_if_applicable(0.5 * sbh),  # dropout mask
+                self.__sp_partition_if_on(0.5 * sbh),  # dropout mask
                 # -  output deallocated: residual doesn't need to store
                 # RESIDUAL
-                self.__sp_partition_if_applicable(sbh),  # needed by norm2, resid2
+                self.__sp_partition_if_on(sbh),  # needed by norm2, resid2
                 # LAYERNORM 2
-                self.__sp_partition_if_applicable(sbh),  # up/gate input
+                self.__sp_partition_if_on(sbh),  # up/gate input
                 # MLP UP/GATE (col parallel linear)
                 self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
                 # SwiGLU
                 self.__tp_partition(sbi),  # SiLU output
                 self.__tp_partition(sbi),  # gate output
                 # MLP DOWN (row parallel linear)
-                # TODO. why isn't this deallocated
-                self.__sp_partition_if_applicable(sbh),
+                # - output deallocated - dropout doesn't need to store
                 # DROPOUT
-                self.__sp_partition_if_applicable(0.5 * sbh),  # dropout mask
+                self.__sp_partition_if_on(0.5 * sbh),  # dropout mask
                 # - output deallocated - residual doesn't need to store
                 # RESIDUAL
                 # input to next norm1, resid1
-                self.__sp_partition_if_applicable(sbh),
+                self.__sp_partition_if_on(sbh),
             )
         elif self.act_ckpting_type == ActivationCheckpointingType.NONE:
             raise NotImplementedError("not yet implemented")
@@ -313,7 +308,7 @@ class ThreeDParallelModel:
     def __tp_partition(self, unpartitoned_numel: int) -> int:
         return safe_divide(unpartitoned_numel, self.parallelism_cfg.tp)
 
-    def __sp_partition_if_applicable(self, unpartitioned_numel: int) -> int:
+    def __sp_partition_if_on(self, unpartitioned_numel: int) -> int:
         if not self.parallelism_cfg.sp_enabled:
             return unpartitioned_numel
         return safe_divide(unpartitioned_numel, self.parallelism_cfg.tp)
