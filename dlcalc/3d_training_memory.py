@@ -97,7 +97,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--activation-checkpointing-type",
-        choices=["none", "full", "selective"],
+        choices=["none", "selective", "super-selective", "full"],
         required=True,
     )
     # fmt: on
@@ -106,7 +106,6 @@ def main() -> None:
     print()
 
     model_def = ThreeDParallelModel(
-        n_params=args.bparams * 1e9,
         parallelism_cfg=ParallelismConfig(
             tp=args.tp,
             pp=args.pp,
@@ -125,7 +124,7 @@ def main() -> None:
         inter_sz=args.inter_sz,
         glu=True,  # TODO.
         vocab_sz=args.vocab_sz,
-        activation_checkpointing_type=ActivationCheckpointingType.from_str(
+        act_ckpting_type=ActivationCheckpointingType.from_str(
             args.activation_checkpointing_type
         ),
     )
@@ -134,37 +133,21 @@ def main() -> None:
     print("--------------------------------------------------------------------------")
     states = model_def.get_states(training=True)
     print(states)
-    print("transformer block params")
-    transformer_block_params = (
-        model_def.layers_per_pp_stage() * model_def.get_transformer_block_n_params()
-    )
-    print(transformer_block_params)
-    print("embedding/LM head params")
-    print(model_def.get_embedding_or_lm_head_n_params())
-    print("params (most loaded stages)")
-    print(transformer_block_params + model_def.get_embedding_or_lm_head_n_params())
     print()
 
     # activations
     print("TRAINING ACTIVATIONS:")
     print("--------------------------------------------------------------------------")
-    per_microbatch_per_layer_per_inflight = (
-        model_def.activation_size_per_microbatch_per_layer()
-    )
-    print("inflight_ubatch_sz/layer:", per_microbatch_per_layer_per_inflight)
-
+    per_microbatch_per_layer_per_inflight = model_def.activation_size_per_microbatch_per_layer()
+    print("act/layer/inflight:", per_microbatch_per_layer_per_inflight)
     max_inflight_microbatches = model_def.max_inflight_microbatches()
-    print("max_inflight_microbatches:", max_inflight_microbatches)
-    per_microbatch_per_layer = (
-        per_microbatch_per_layer_per_inflight * max_inflight_microbatches
-    )
-    print("act/layer:", per_microbatch_per_layer)
-
     layers_per_pp_stage = model_def.layers_per_pp_stage()
-    print(f"  layers/pp_stage = {layers_per_pp_stage}")
-
-    per_microbatch = per_microbatch_per_layer * layers_per_pp_stage
-    print("act/pp_stage:", per_microbatch)
+    print(
+        f"act/pp_stage = "
+        f"{per_microbatch_per_layer_per_inflight} * "
+        f"{max_inflight_microbatches} * "
+        f"{layers_per_pp_stage} = "
+        f"{per_microbatch_per_layer_per_inflight * max_inflight_microbatches * layers_per_pp_stage}")
 
 
 if __name__ == "__main__":

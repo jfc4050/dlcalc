@@ -70,6 +70,10 @@ class States:
         )
 
 
+def _sum(*summands):
+    return sum(list(summands))
+
+
 @dataclasses.dataclass
 class ThreeDParallelModel:
     """
@@ -81,7 +85,6 @@ class ThreeDParallelModel:
     """
 
     parallelism_cfg: ParallelismConfig
-    n_params: int
 
     sequence_len: int
     microbatch_sz: int
@@ -99,25 +102,26 @@ class ThreeDParallelModel:
 
     vocab_sz: int
 
-    activation_checkpointing_type: ActivationCheckpointingType
+    act_ckpting_type: ActivationCheckpointingType
 
     # TODO. assuming mixed precision here.
     bytes_per_parameter: int = 2
 
     def get_transformer_block_n_params(self) -> int:
-        numel = sum(
-            [
-                # qkv_proj (col parallel)
-                self.hidden_sz
-                * ((self.n_q_heads + 2 * self.n_kv_heads) * self.head_dim),
-                # attn out_proj (row parallel)
-                self.hidden_sz * self.hidden_sz,
-                # MLP layer 1 (col parallel)
-                self.hidden_sz * ((self.inter_sz * 2) if self.glu else self.inter_sz),
-                # MLP layer 2 (row parallel)
-                self.inter_sz * self.hidden_sz,
-            ]
-        ) / self.parallelism_cfg.tp
+        numel = _sum(
+            # norm1,
+            self.hidden_sz,
+            # qkv_proj (col parallel)
+            self.hidden_sz * ((self.n_q_heads + 2 * self.n_kv_heads) * self.head_dim),
+            # attn out_proj (row parallel)
+            self.hidden_sz * self.hidden_sz,
+            # norm2
+            self.hidden_sz,
+            # MLP layer 1 (col parallel)
+            self.hidden_sz * ((self.inter_sz * 2) if self.glu else self.inter_sz),
+            # MLP layer 2 (row parallel)
+            self.inter_sz * self.hidden_sz,
+        )
 
         return Size(numel=numel, bytes_per_element=self.bytes_per_parameter)
 
@@ -128,19 +132,35 @@ class ThreeDParallelModel:
         )
 
     def get_states(self, training: bool) -> States:
+        params_in_most_loaded_pp_stage = (
+            self.get_embedding_or_lm_head_n_params()
+            + self.layers_per_pp_stage() * self.get_transformer_block_n_params()
+        ).numel()
+        tp_params_most_loaded_pp_stage = (
+            params_in_most_loaded_pp_stage / self.parallelism_cfg.tp
+        )
+
         return States(
             params=Size(
-                numel=self.__param_numel_per_mp_rank(),
+                numel=tp_params_most_loaded_pp_stage,
                 bytes_per_element=self.bytes_per_parameter,
             ),
             grads=Size(
-                numel=self.__grad_numel_per_mp_rank(),
+                numel=tp_params_most_loaded_pp_stage,
                 bytes_per_element=self.bytes_per_parameter,
             )
             if training
             else None,
+            # see:
+            # https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
             optim_states=Size(
-                numel=self.__optim_states_numel_per_mp_rank(),
+                numel=(
+                    # fp32 params
+                    tp_params_most_loaded_pp_stage
+                    +
+                    # momentum/variance
+                    2 * tp_params_most_loaded_pp_stage / self.parallelism_cfg.dp
+                ),
                 # TODO. assuming AMP here.
                 bytes_per_element=4,
             )
@@ -184,107 +204,111 @@ class ThreeDParallelModel:
         See: Reducing Activation Recomputation in Large Transformer Models
         https://arxiv.org/pdf/2205.05198.pdf
         """
-        sp = self.parallelism_cfg.sp_enabled
-
         sbh = self.sequence_len * self.microbatch_sz * self.hidden_sz
         sbi = self.sequence_len * self.microbatch_sz * self.inter_sz
+        sbq = self.sequence_len * self.microbatch_sz * self.n_q_heads * self.head_dim
+        sbkv = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
 
-        if self.activation_checkpointing_type == ActivationCheckpointingType.FULL:
-            # just the block input
-            return safe_divide(sbh, self.parallelism_cfg.tp) if sp else sbh
-        elif (
-            self.activation_checkpointing_type == ActivationCheckpointingType.SELECTIVE
-        ):
-            sp = self.parallelism_cfg.sp_enabled
-            return sum(
-                [
-                    # LAYERNORM 1
-                    safe_divide(sbh, self.parallelism_cfg.tp) if sp else sbh,  # input
-                    # ATTENTION
-                    sbh,  # QKV matmul input
-                    # skipping Q @ K.T (checkpointed by FlashAttention)
-                    # skipping Softmax (checkpointed by FlashAttention)
-                    # skipping Softmax dropout (checkpointed by FlashAttention)
-                    safe_divide(sbh, self.parallelism_cfg.tp),  # down proj input.
-                    # LAYERNORM 2
-                    sbh,  # layernorm 2 input
-                    # MLP
-                    sbh,  # up/gate input
-                    safe_divide(sbi, self.parallelism_cfg.tp),  # activation input
-                    safe_divide(sbi, self.parallelism_cfg.tp),  # down input
-                    safe_divide(sbh, 2),  # dropout mask
-                    # TODO. this is sort of hacky, dropout mask is 1 byte so setting as half numel
-                ]
+        if self.act_ckpting_type == ActivationCheckpointingType.FULL:
+            return self.__sp_partition_if_applicable(sbh)  # just the block input
+        elif self.act_ckpting_type == ActivationCheckpointingType.SUPER_SELECTIVE:
+            return _sum(
+                # LAYERNORM 1
+                # - output is recomputed
+                # QKV (col parallel linear)
+                self.__tp_partition(sbq),  # Q - attn input
+                self.__tp_partition(sbkv),  # K - attn input
+                self.__tp_partition(sbkv),  # V - attn input
+                # SELF ATTENTION
+                # - skipping Q @ K.T (checkpointed by FlashAttention)
+                # - skipping Softmax (checkpointed by FlashAttention)
+                # - skipping Softmax dropout (checkpointed by FlashAttention)
+                self.__tp_partition(sbh),  # attn output
+                # DOWN PROJ
+                # - deallocated (dropout doesn't need to store)
+                # DROPOUT
+                # - dropout mask recomputed
+                # - deallocated - residual doesn't need to store
+                # RESIDUAL
+                self.__sp_partition_if_applicable(sbh),  # stored by norm2, residual2
+                # LAYERNORM 2
+                # output is recomputed
+                # MLP UP/GATE (col parallel linear)
+                self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
+                # SwiGLU
+                # - output is recomputed
+                # MLP DOWN (row parallel linear)
+                self.__sp_partition_if_applicable(sbh),  # TODO. why not deallocated?
+                # DROPOUT
+                # - dropout mask recomputed
+                # - output deallocated - residual doesn't need to store
+                # RESIDUAL
+                self.__sp_partition_if_applicable(sbh),  # for by next norm1, residual1
             )
-        elif self.activation_checkpointing_type == ActivationCheckpointingType.NONE:
-            return sum(
-                [
-                    # LAYERNORM 1
-                    sbh,  # layernorm 1 input
-                    # ATTENTION
-                    sbh,  # QKV matmul input
-                    # skipping Q @ K.T (checkpointed by FlashAttention)
-                    # skipping Softmax (checkpointed by FlashAttention)
-                    # skipping Softmax dropout (checkpointed by FlashAttention)
-                    sbh,  # down proj input.
-                    # LAYERNORM 2
-                    sbh,  # layernorm 2 input
-                    # MLP
-                    sbh,  # up/gate input
-                    sbi,  # activation input
-                    sbi,  # down input TODO. pass inter_sz
-                    0.5 * sbh,  # dropout mask
-                    # TODO. this is sort of hacky, dropout mask is 1 byte so setting as half numel
-                ]
+        elif self.act_ckpting_type == ActivationCheckpointingType.SELECTIVE:
+            return _sum(
+                # LAYERNORM 1
+                self.__sp_partition_if_applicable(sbh),  # output - QKV input
+                # QKV PROJ (col parallel linear)
+                self.__tp_partition(sbq),  # Q - attn input
+                self.__tp_partition(sbkv),  # K - attn input
+                self.__tp_partition(sbkv),  # V - attn input
+                # SELF ATTENTION
+                # skipping Q @ K.T (checkpointed by FlashAttention)
+                # skipping Softmax (checkpointed by FlashAttention)
+                # skipping Softmax dropout (checkpointed by FlashAttention)
+                self.__tp_partition(sbh),  # needed by down proj
+                # DOWN PROJ
+                # - deallocated (dropout doesn't need to store)
+                # DROPOUT
+                self.__sp_partition_if_applicable(0.5 * sbh),  # dropout mask
+                # -  output deallocated: residual doesn't need to store
+                # RESIDUAL
+                # needed by layernorm2, residual2
+                self.__sp_partition_if_applicable(sbh),
+                # LAYERNORM 2
+                self.__sp_partition_if_applicable(sbh),  # up/gate input
+                # MLP UP/GATE (col parallel linear)
+                self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
+                # SwiGLU
+                self.__tp_partition(sbi),  # SiLU output
+                self.__tp_partition(sbi),  # gate output
+                # MLP DOWN (row parallel linear)
+                # TODO. why isn't this deallocated
+                self.__sp_partition_if_applicable(sbh),
+                # DROPOUT
+                self.__sp_partition_if_applicable(0.5 * sbh),  # dropout mask
+                # - output deallocated - residual doesn't need to store
+                # RESIDUAL
+                # input to next norm1, resid1
+                self.__sp_partition_if_applicable(sbh),
+            )
+        elif self.act_ckpting_type == ActivationCheckpointingType.NONE:
+            return _sum(
+                # LAYERNORM 1
+                sbh,  # layernorm 1 input
+                # ATTENTION
+                sbh,  # QKV matmul input
+                # skipping Q @ K.T (checkpointed by FlashAttention)
+                # skipping Softmax (checkpointed by FlashAttention)
+                # skipping Softmax dropout (checkpointed by FlashAttention)
+                sbh,  # down proj input.
+                # LAYERNORM 2
+                sbh,  # layernorm 2 input
+                # MLP
+                sbh,  # up/gate input
+                sbi,  # activation input
+                sbi,  # down input TODO. pass inter_sz
+                0.5 * sbh,  # dropout mask
+                # TODO. this is sort of hacky, dropout mask is 1 byte so setting as half numel
             )
         else:
-            raise ValueError(
-                f"unhandled checkpointing_type={self.activation_checkpointing_type}"
-            )
+            raise ValueError(f"unhandled checkpointing_type={self.act_ckpting_type}")
 
-    def __param_numel_per_mp_rank(self) -> int:
-        """parameters are partitioned with tensor and pipeline parallelism. note this is
-        an approximation. not all parameters are evenly partitioned."""
-        if (
-            self.parallelism_cfg.zero_level
-            >= ParallelismConfig.ZeroLevel.PARTITION_PARAMETERS
-        ):
-            raise NotImplementedError
+    def __tp_partition(self, unpartitoned_numel: int) -> int:
+        return safe_divide(unpartitoned_numel, self.parallelism_cfg.tp)
 
-        return self.n_params / self.parallelism_cfg.mp_degree()
-
-    def __grad_numel_per_mp_rank(self) -> int:
-        """gradients are not partitioned by TP.
-
-        see: https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
-        """
-        if (
-            self.parallelism_cfg.zero_level
-            < ParallelismConfig.ZeroLevel.PARTITION_GRADIENTS
-        ):
-            return self.n_params / self.parallelism_cfg.mp_degree()
-        else:
-            return self.n_params / self.parallelism_cfg.world_size()
-
-    def __optim_states_numel_per_mp_rank(self) -> int:
-        """here we assume Adam, that is three optimizer states per parameter -
-        (param, momentum, variance)
-
-        see https://arxiv.org/pdf/1910.02054.pdf. This equation is for ZeRO1 optimizer
-        used along with 3D parallelism.
-
-        also see https://github.com/NVIDIA/Megatron-LM?tab=readme-ov-file#distributed-optimizer
-        """
-        numel_unpartitioned_adam = self.n_params * 3
-        if (
-            self.parallelism_cfg.zero_level
-            < ParallelismConfig.ZeroLevel.PARTITION_OPTIMIZER
-        ):
-            return numel_unpartitioned_adam / self.parallelism_cfg.mp_degree()
-        else:
-            return (
-                # fp32 optimizer state
-                self.n_params / self.parallelism_cfg.mp_degree()
-                # momentum + variance
-                + 2 * self.n_params / self.parallelism_cfg.world_size()
-            )
+    def __sp_partition_if_applicable(self, unpartitioned_numel: int) -> int:
+        if not self.parallelism_cfg.sp_enabled:
+            return unpartitioned_numel
+        return safe_divide(unpartitioned_numel, self.parallelism_cfg.tp)
