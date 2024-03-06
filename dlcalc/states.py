@@ -75,13 +75,6 @@ def _sum(*summands):
 
 @dataclasses.dataclass
 class ThreeDParallelModel:
-    """
-    a great blog post summarizing many of the equations coded below:
-    https://eleutherai.notion.site/Transformers-Math-101-d2fcfc7a25d446388fde97821ad2412a
-
-    also see:
-    https://gist.github.com/Quentin-Anthony/f43939791a7ceb0b01a4937308317be5
-    """
 
     parallelism_cfg: ParallelismConfig
 
@@ -98,6 +91,8 @@ class ThreeDParallelModel:
 
     inter_sz: int
     glu: bool
+
+    rotary_embed: bool
 
     vocab_sz: int
 
@@ -223,6 +218,9 @@ class ThreeDParallelModel:
                 self.__tp_partition(sbq),  # Q - attn input
                 self.__tp_partition(sbkv),  # K - attn input
                 self.__tp_partition(sbkv),  # V - attn input
+                # ROTARY EMBEDDINGS
+                self.__tp_partition(sbq if self.rotary_embed else 0),  # Q rotary
+                self.__tp_partition(sbkv if self.rotary_embed else 0),  # K rotary
                 # SELF ATTENTION
                 # - skipping intermediates (checkpointed by FlashAttention)
                 self.__tp_partition(sbh),  # attn output
@@ -255,11 +253,14 @@ class ThreeDParallelModel:
                 self.__tp_partition(sbq),  # Q - attn input
                 self.__tp_partition(sbkv),  # K - attn input
                 self.__tp_partition(sbkv),  # V - attn input
+                # ROTARY EMBEDDINGS
+                self.__tp_partition(sbq if self.rotary_embed else 0),  # Q rotary
+                self.__tp_partition(sbkv if self.rotary_embed else 0),  # K rotary
                 # SELF ATTENTION
                 # - skipping intermediates (checkpointed by FlashAttention)
                 self.__tp_partition(sbh),  # needed by down proj
                 # DOWN PROJ
-                # - deallocated (dropout doesn't need to store)
+                # - output deallocated (dropout doesn't need to store)
                 # DROPOUT
                 self.__sp_partition_if_on(0.5 * sbh),  # dropout mask
                 # -  output deallocated: residual doesn't need to store
