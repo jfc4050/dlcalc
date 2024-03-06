@@ -1,6 +1,7 @@
-"""CLI tool for various deep learning estimations."""
+"""CLI tool for estimating memory consumption of 3D parallel training."""
 
 from argparse import ArgumentParser
+import json
 import math
 
 from dlcalc.states import ThreeDParallelModel, ParallelismConfig
@@ -10,12 +11,6 @@ from dlcalc.utils.configurations import ActivationCheckpointingType
 def main() -> None:
     parser = ArgumentParser(__doc__)
     # fmt: off
-    parser.add_argument(
-        "--bparams",
-        type=int,
-        required=True,
-        help="Actor/SFT number of parameters, in billions",
-    )
     parser.add_argument(
         "--n-layers",
         type=int,
@@ -49,6 +44,18 @@ def main() -> None:
     parser.add_argument(
         "--vocab-sz",
         type=int,
+        required=True,
+    )
+    parser.add_argument(
+        "--glu",
+        type=bool,
+        help="whether model uses gated linear units",
+        required=True,
+    )
+    parser.add_argument(
+        "--rotary-embeds",
+        type=bool,
+        help="whether model uses gated linear units",
         required=True,
     )
     parser.add_argument(
@@ -87,7 +94,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--sequence-parallel",
-        action="store_true",
+        type=bool,
+        required=True,
+        help="whether or not sequence parallelism is enabled."
     )
     parser.add_argument(
         "--zero-level",
@@ -103,7 +112,7 @@ def main() -> None:
     )
     # fmt: on
     args = parser.parse_args()
-    print(args)
+    print(json.dumps(args.__dict__, indent=2))
     print()
 
     model_def = ThreeDParallelModel(
@@ -123,7 +132,8 @@ def main() -> None:
         n_kv_heads=args.n_kv_heads,
         head_dim=args.head_dim,
         inter_sz=args.inter_sz,
-        glu=True,  # TODO.
+        glu=args.glu,
+        rotary_embed=args.rotary_embeds,
         vocab_sz=args.vocab_sz,
         act_ckpting_type=ActivationCheckpointingType.from_str(
             args.activation_checkpointing_type
