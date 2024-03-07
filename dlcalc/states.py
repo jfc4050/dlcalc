@@ -7,7 +7,7 @@ from .utils.configurations import ActivationCheckpointingType
 
 
 @dataclasses.dataclass
-class ParallelismConfig:
+class ParallelConfig:
     class ZeroLevel(int, Enum):
         NONE = 0
         PARTITION_OPTIMIZER = 1
@@ -43,6 +43,17 @@ class Zero3Model:
         return self.n_params / self.world_size
 
 
+class DistributedAdamOptimizerStates:
+    """
+    see: https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
+    """
+
+    def __init__(self, n_params: int, store_param_remainders: bool, dp: int):
+        self.param_shard = Size(n_params / dp, bytes_per_element=4)
+        self.exp_avg_shard = Size(n_params / dp, bytes_per_element=4)
+        self.exp_avg_sq_shard = Size(n_params / dp, bytes_per_element=4)
+
+
 class States:
     def __init__(self, params: Size, grads: Size, optim_states: Size) -> None:
         self.params = params
@@ -75,8 +86,7 @@ def _sum(*summands):
 
 @dataclasses.dataclass
 class ThreeDParallelModel:
-
-    parallelism_cfg: ParallelismConfig
+    parallelism_cfg: ParallelConfig
 
     sequence_len: int
     microbatch_sz: int
@@ -121,7 +131,7 @@ class ThreeDParallelModel:
 
         return Size(numel=numel, bytes_per_element=self.bytes_per_parameter)
 
-    def get_embedding_or_lm_head_n_params(self) -> int:
+    def get_embedding_or_lm_head_n_params(self) -> Size:
         return Size(
             numel=self.hidden_sz * self.vocab_sz / self.parallelism_cfg.tp,
             bytes_per_element=self.bytes_per_parameter,
@@ -132,11 +142,9 @@ class ThreeDParallelModel:
             self.get_embedding_or_lm_head_n_params()
             + self.layers_per_pp_stage() * self.get_transformer_block_n_params()
         ).numel()
-        tp_params_most_loaded_pp_stage = (
-            params_in_most_loaded_pp_stage / self.parallelism_cfg.tp
-        )
+        tp_params_most_loaded_pp_stage = params_in_most_loaded_pp_stage / self.parallelism_cfg.tp
 
-        if self.parallelism_cfg.zero_level != ParallelismConfig.ZeroLevel.PARTITION_GRADIENTS:
+        if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_GRADIENTS:
             raise NotImplementedError
 
         return States(
@@ -154,13 +162,7 @@ class ThreeDParallelModel:
             if training
             else None,
             optim_states=Size(
-                numel=(
-                    # fp32 params
-                    tp_params_most_loaded_pp_stage
-                    +
-                    # momentum/variance
-                    2 * tp_params_most_loaded_pp_stage / self.parallelism_cfg.dp
-                ),
+                numel=3 * tp_params_most_loaded_pp_stage / self.parallelism_cfg.dp,
                 bytes_per_element=self.bytes_per_optim_state,
             )
             if training

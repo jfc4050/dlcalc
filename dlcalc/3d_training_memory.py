@@ -135,9 +135,7 @@ def main() -> None:
         glu=args.glu,
         rotary_embed=args.rotary_embeds,
         vocab_sz=args.vocab_sz,
-        act_ckpting_type=ActivationCheckpointingType.from_str(
-            args.activation_checkpointing_type
-        ),
+        act_ckpting_type=ActivationCheckpointingType.from_str(args.activation_checkpointing_type),
     )
 
     print("STATES")
@@ -149,9 +147,7 @@ def main() -> None:
     # activations
     print("TRAINING ACTIVATIONS:")
     print("--------------------------------------------------------------------------")
-    per_microbatch_per_layer_per_inflight = (
-        model_def.activation_size_per_microbatch_per_layer()
-    )
+    per_microbatch_per_layer_per_inflight = model_def.activation_size_per_microbatch_per_layer()
     print("act/layer/inflight:", per_microbatch_per_layer_per_inflight)
     max_inflight_microbatches = model_def.max_inflight_microbatches()
     layers_per_pp_stage = model_def.layers_per_pp_stage()
@@ -172,9 +168,7 @@ def main() -> None:
 
     print("TOTAL:")
     print("--------------------------------------------------------------------------")
-    print(
-        f"total mem (GiB) = {(states.total_bytes() + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
-    )
+    print(f"total mem (GiB) = {(states.total_bytes() + act_memory.bytes()) / (1024 ** 3):.3f}GiB")
     print()
 
 

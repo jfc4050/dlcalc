@@ -10,9 +10,7 @@ class Size:
                 f"{self._bytes_per_element} vs {other._bytes_per_element}"
             )
 
-        return Size(
-            numel=self._numel + other._numel, bytes_per_element=self._bytes_per_element
-        )
+        return Size(numel=self._numel + other._numel, bytes_per_element=self._bytes_per_element)
 
     def __mul__(self, multiplicand) -> "Size":
         return Size(self._numel * multiplicand, self._bytes_per_element)
