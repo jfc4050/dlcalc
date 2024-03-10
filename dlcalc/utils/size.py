@@ -18,11 +18,17 @@ class Size:
     def __rmul__(self, multiplicand) -> "Size":
         return Size(self._numel * multiplicand, self._bytes_per_element)
 
+    def __truediv__(self, divisor: int) -> "Size":
+        return Size(self._numel / divisor, self._bytes_per_element)
+
     def __repr__(self) -> str:
         return f"numel: {self._numel * 1e-9:.3f}B, bytes: {self._numel * self._bytes_per_element / (1024 ** 3):.3f}GiB"
 
     def numel(self) -> int:
         return self._numel
+
+    def bits(self) -> int:
+        return self._numel * self._bytes_per_element * 8
 
     def bytes(self) -> int:
         return self._numel * self._bytes_per_element

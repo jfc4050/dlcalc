@@ -1,9 +1,9 @@
 import dataclasses
 from enum import Enum
 
-from dlcalc.utils.math import safe_divide
-from .utils.size import Size
-from .utils.configurations import ActivationCheckpointingType
+from .math import safe_divide
+from .size import Size
+from .configurations import ActivationCheckpointingType
 
 
 @dataclasses.dataclass
@@ -31,25 +31,18 @@ class ParallelConfig:
         return self.tp * self.pp * self.dp
 
 
-@dataclasses.dataclass
-class Zero3Model:
-    n_params: int
-    world_size: int
-
-    # TODO. assuming mixed precision here.
-    bytes_per_parameter: int = 2
-
-    def params_per_rank(self):
-        return self.n_params / self.world_size
-
-
 class DistributedAdamOptimizerStates:
     """
     see: https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
     """
 
-    def __init__(self, n_params: int, store_param_remainders: bool, dp: int):
-        self.param_shard = Size(n_params / dp, bytes_per_element=4)
+    def __init__(self, n_params: int, store_param_remainders: bool, dp: int) -> None:
+        self.param_shard = Size(
+            n_params / dp,
+            # storing param remainders means that the optimizer stores the extra
+            # 16 bits 
+            bytes_per_element=2 if store_param_remainders else 4
+        )
         self.exp_avg_shard = Size(n_params / dp, bytes_per_element=4)
         self.exp_avg_sq_shard = Size(n_params / dp, bytes_per_element=4)
 
@@ -113,7 +106,7 @@ class ThreeDParallelModel:
     bytes_per_grad: int = 4
     bytes_per_optim_state: int = 4
 
-    def get_transformer_block_n_params(self) -> int:
+    def get_transformer_block_n_params(self) -> Size:
         numel = _sum(
             # norm1,
             self.hidden_sz,
@@ -136,6 +129,9 @@ class ThreeDParallelModel:
             numel=self.hidden_sz * self.vocab_sz / self.parallelism_cfg.tp,
             bytes_per_element=self.bytes_per_parameter,
         )
+
+    def get_total_n_params(self) -> Size:
+        return 2 * self.get_embedding_or_lm_head_n_params() + self.n_layers * self.get_transformer_block_n_params()
 
     def get_states(self, training: bool) -> States:
         params_in_most_loaded_pp_stage = (
