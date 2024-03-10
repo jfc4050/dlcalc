@@ -14,6 +14,7 @@ from dlcalc.utils.math import safe_divide
 
 
 def _print_section_header(section_name: str) -> None:
+    print()
     print("--------------------------------------------------------------------------")
     print(section_name)
     print("--------------------------------------------------------------------------")
@@ -30,7 +31,6 @@ def main() -> None:
 
     _print_section_header("CONFIG")
     print(json.dumps(cfg, indent=2))
-    print()
 
     model_def = ThreeDParallelModel(
         parallelism_cfg=ParallelConfig(
@@ -60,6 +60,7 @@ def main() -> None:
     cluster_size = model_def.parallelism_cfg.world_size()
     print(machine_spec)
     print("n_devices: ", cluster_size)
+    print("n_nodes: ", safe_divide(cluster_size, machine_spec.n_devices))
 
     ###################################################################################
     # MEMORY ANALYSIS
@@ -67,10 +68,8 @@ def main() -> None:
 
     _print_section_header("STATES")
     print("total params: ", model_def.get_total_n_params())
-    print()
     states = model_def.get_states(training=True)
     print(states)
-    print()
 
     # activations
     _print_section_header("TRAINING ACTIVATIONS:")
@@ -91,11 +90,9 @@ def main() -> None:
         f"{math.ceil(vpp_penalty * layers_per_pp_stage)} = "
         f"{act_memory}"
     )
-    print()
 
     _print_section_header("TOTAL MEM")
     print(f"total mem (GiB) = {(states.total_bytes() + act_memory.bytes()) / (1024 ** 3):.3f}GiB")
-    print()
 
     ###################################################################################
     # PERF ANALYSIS
@@ -111,7 +108,6 @@ def main() -> None:
     print(
         f"pipeline bubble fraction: {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
     )
-    print()
 
     _print_section_header("DP COMM")
     if model_def.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
