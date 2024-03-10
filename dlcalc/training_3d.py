@@ -56,7 +56,9 @@ def main() -> None:
         ),
     )
     machine_spec = MachineSpec.from_str(cfg["hardware"]["node_type"])
+    cluster_size = model_def.parallelism_cfg.world_size()
     print(machine_spec)
+    print("n_devices: ", cluster_size)
 
     ###################################################################################
     # MEMORY ANALYSIS
@@ -98,38 +100,36 @@ def main() -> None:
     # PERF ANALYSIS
     ###################################################################################
     # TODO. pipeline bubble
+    _print_section_header("DP COMM")
     if model_def.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_GRADIENTS:
         raise NotImplementedError
     else:
-        param_size = states.params
-
-        grad_size = states.grads
-        dp_size = model_def.parallelism_cfg.dp
-
         # compute the backward time for a single microbatch.
         # NOTE: this is fully sequential, there's no other microbatches to overlap with
         single_microbatch_bwd_tflops = (
             2  # FLOPs/MAC
-            * 2  # factor for backward only
+            * 2  # factor for backward only (2 GEMMs per op)
             * model_def.microbatch_sz
             * model_def.sequence_len
             * model_def.get_total_n_params().numel()
         ) * 1e-12
 
-        # divide by single pipeline stage TFLOPs
+        # divide by single pipeline stage TFLOPs, since its just for single
+        # microbatch there's only one active pipeline stage at a time
         single_microbatch_bwd_time = single_microbatch_bwd_tflops / machine_spec.total_flops()
         print(f"single microbatch_bwd_time {single_microbatch_bwd_time:.2f}s")
 
+        grad_size = states.grads
         grad_reduce_scatter_vol = get_grad_reducescatter_volume(
-            grad_size=grad_size, dp_size=dp_size
+            grad_size=grad_size, dp_size=model_def.parallelism_cfg.dp
         )
         # NOTE: assumes duplex = 2x unidirectional
         grad_reduce_scatter_time_s = grad_reduce_scatter_vol.bits() / (
-            # divide full BW among devices
+            # divide full BW among devices (which will be part of different DP groups)
             machine_spec.inter_node_connect.unidirectional_bw_bps / machine_spec.n_devices
         )
         print(f"reduce_scatter(grads) vol: {grad_reduce_scatter_vol}")
-        print(f"reduce_scatter(grads) time: {grad_reduce_scatter_time_s}")
+        print(f"reduce_scatter(grads) time: {grad_reduce_scatter_time_s:.2f}s")
 
 
 if __name__ == "__main__":

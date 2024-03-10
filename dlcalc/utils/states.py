@@ -152,7 +152,7 @@ class ThreeDParallelModel:
             # https://github.com/NVIDIA/apex/blob/master/apex/contrib/optimizers/distributed_fused_adam.py
             # https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
             grads=Size(
-                numel=tp_params_most_loaded_pp_stage / self.parallelism_cfg.dp,
+                numel=tp_params_most_loaded_pp_stage,
                 bytes_per_element=self.bytes_per_grad,
             )
             if training
