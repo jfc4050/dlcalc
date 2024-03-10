@@ -10,6 +10,7 @@ from dlcalc.utils.states import ThreeDParallelModel, ParallelConfig
 from dlcalc.utils.comms import get_grad_reducescatter_volume
 from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.hardware import MachineSpec
+from dlcalc.utils.math import safe_divide
 
 
 def _print_section_header(section_name: str) -> None:
@@ -99,9 +100,19 @@ def main() -> None:
     ###################################################################################
     # PERF ANALYSIS
     ###################################################################################
-    # TODO. pipeline bubble
+    _print_section_header("PIPELINE BUBBLE")
+    gbs = cfg["data"]["gbs"]
+    mbs = cfg["data"]["microbatch_sz"]
+    vpp = cfg["parallelism"]["vpp"]
+    bs_per_dp = safe_divide(gbs, model_def.parallelism_cfg.dp)
+    n_microbatches = safe_divide(bs_per_dp, mbs)
+    print(
+        f"pipeline bubble fraction: {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
+    )
+    print()
+
     _print_section_header("DP COMM")
-    if model_def.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_GRADIENTS:
+    if model_def.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
         # compute the backward time for a single microbatch.

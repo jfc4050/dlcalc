@@ -140,7 +140,7 @@ class ThreeDParallelModel:
         ).numel()
         tp_params_most_loaded_pp_stage = params_in_most_loaded_pp_stage / self.parallelism_cfg.tp
 
-        if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_GRADIENTS:
+        if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
             raise NotImplementedError
 
         return States(
