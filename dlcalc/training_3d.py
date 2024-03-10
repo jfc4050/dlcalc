@@ -106,6 +106,8 @@ def main() -> None:
     vpp = cfg["parallelism"]["vpp"]
     bs_per_dp = safe_divide(gbs, model_def.parallelism_cfg.dp)
     n_microbatches = safe_divide(bs_per_dp, mbs)
+    print(f"gbs={gbs}")
+    print(f"gbs/dp={bs_per_dp}")
     print(
         f"pipeline bubble fraction: {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
     )
