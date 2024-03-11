@@ -10,7 +10,7 @@ from dlcalc.utils.states import ThreeDParallelModel, ParallelConfig
 from dlcalc.utils.comms import get_grad_reducescatter_volume
 from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.hardware import MachineSpec
-from dlcalc.utils.math import safe_divide
+from dlcalc.utils.math import compute_gemm_tflops, safe_divide
 
 
 def _print_section_header(section_name: str) -> None:
@@ -97,6 +97,19 @@ def main() -> None:
     ###################################################################################
     # PERF ANALYSIS
     ###################################################################################
+    _print_section_header("GEMMs")
+    for proj_name, proj_shape in [
+        ("QKV", model_def.qkv_proj_shape),
+        ("attn_out", model_def.attn_out_proj_shape),
+        ("MLP1", model_def.mlp_up_proj_shape),
+        ("MLP2", model_def.mlp_down_proj_shape),
+    ]:
+        tflops = compute_gemm_tflops(
+            proj_shape, seqlen=model_def.sequence_len, batch_sz=model_def.microbatch_sz,
+        )
+        print(f"{proj_name} ({proj_shape}): {tflops:.2f}TFLOPs -> {tflops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_tflops) * 1000:.3f}ms expected runtime")
+
+
     _print_section_header("PIPELINE BUBBLE")
     gbs = cfg["data"]["gbs"]
     mbs = cfg["data"]["microbatch_sz"]

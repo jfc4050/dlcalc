@@ -1,7 +1,7 @@
 import dataclasses
 from enum import Enum
 
-from .math import safe_divide
+from .math import product, safe_divide
 from .size import Size
 from .configurations import ActivationCheckpointingType
 
@@ -106,20 +106,26 @@ class ThreeDParallelModel:
     bytes_per_grad: int = 4
     bytes_per_optim_state: int = 4
 
+    def __post_init__(self) -> None:
+        self.qkv_proj_shape = (self.hidden_sz, (self.n_q_heads + 2 * self.n_kv_heads) * self.head_dim)
+        self.attn_out_proj_shape = (self.hidden_sz, self.hidden_sz)
+        self.mlp_up_proj_shape = (self.hidden_sz, (self.inter_sz * 2) if self.glu else self.inter_sz)
+        self.mlp_down_proj_shape = (self.inter_sz, self.hidden_sz)
+
     def get_transformer_block_n_params(self) -> Size:
         numel = _sum(
             # norm1,
             self.hidden_sz,
             # qkv_proj (col parallel)
-            self.hidden_sz * ((self.n_q_heads + 2 * self.n_kv_heads) * self.head_dim),
+            product(self.qkv_proj_shape),
             # attn out_proj (row parallel)
-            self.hidden_sz * self.hidden_sz,
+            product(self.attn_out_proj_shape),
             # norm2
             self.hidden_sz,
             # MLP layer 1 (col parallel)
-            self.hidden_sz * ((self.inter_sz * 2) if self.glu else self.inter_sz),
+            product(self.mlp_up_proj_shape),
             # MLP layer 2 (row parallel)
-            self.inter_sz * self.hidden_sz,
+            product(self.mlp_down_proj_shape),
         )
 
         return Size(numel=numel, bytes_per_element=self.bytes_per_parameter)
