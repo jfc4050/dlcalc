@@ -156,9 +156,10 @@ def main() -> None:
 
     _print_section_header("WEAK SCALING")
     full_dp_comm_vol_factor = (model_def.parallelism_cfg.dp - 1) /model_def.parallelism_cfg.dp
-    for dp in range(1, model_def.parallelism_cfg.dp + 1):
+    for dp in range(1, min(model_def.parallelism_cfg.dp, 8) + 1):
         factor = (dp - 1) / dp
         print(f"DP={dp} -> {(factor / full_dp_comm_vol_factor) * 100:.2f}% scaling degradation")
+    print("...")
 
 
 if __name__ == "__main__":
