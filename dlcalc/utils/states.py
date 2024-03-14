@@ -112,6 +112,12 @@ class ThreeDParallelModel:
         self.mlp_up_proj_shape = (self.hidden_sz, (self.inter_sz * 2) if self.glu else self.inter_sz)
         self.mlp_down_proj_shape = (self.inter_sz, self.hidden_sz)
 
+        if self.n_layers % (self.parallelism_cfg.pp * self.parallelism_cfg.vpp) != 0:
+            raise ValueError(
+                f"number of layers {self.n_layers} is not divisible by the product "
+                f"of PP={self.parallelism_cfg.pp} and VPP={self.parallelism_cfg.vpp}"
+            )
+
     def get_transformer_block_n_params(self) -> Size:
         numel = _sum(
             # norm1,

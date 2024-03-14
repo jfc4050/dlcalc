@@ -118,6 +118,7 @@ def main() -> None:
     n_microbatches = safe_divide(bs_per_dp, mbs)
     print(f"gbs={gbs}")
     print(f"gbs/dp={bs_per_dp}")
+    print(f"VPP multiplier={(1 / vpp):.2f}")
     print(
         f"pipeline bubble fraction: {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
     )
@@ -152,6 +153,12 @@ def main() -> None:
         )
         print(f"reduce_scatter(grads) vol: {grad_reduce_scatter_vol}")
         print(f"reduce_scatter(grads) time: {grad_reduce_scatter_time_s:.2f}s")
+
+    _print_section_header("WEAK SCALING")
+    full_dp_comm_vol_factor = (model_def.parallelism_cfg.dp - 1) /model_def.parallelism_cfg.dp
+    for dp in range(1, model_def.parallelism_cfg.dp + 1):
+        factor = (dp - 1) / dp
+        print(f"DP={dp} -> {(factor / full_dp_comm_vol_factor) * 100:.2f}% scaling degradation")
 
 
 if __name__ == "__main__":
