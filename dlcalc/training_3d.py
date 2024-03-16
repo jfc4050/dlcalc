@@ -1,4 +1,4 @@
-"""CLI tool for estimating memory consumption of 3D parallel training."""
+"""CLI tool for estimating performance characteristics of 3D parallel training."""
 
 from argparse import ArgumentParser
 import json
@@ -67,8 +67,8 @@ def main() -> None:
     ###################################################################################
 
     _print_section_header("STATES")
-    print("total params: ", model_def.get_total_n_params())
-    states = model_def.get_states(training=True)
+    print(f"total params: {model_def.get_total_n_params_unpartitioned() * 1e-9:.2f}B")
+    states = model_def.get_partitioned_states(training=True)
     print(states)
 
     # activations
@@ -78,6 +78,7 @@ def main() -> None:
     max_inflight_microbatches = model_def.max_inflight_microbatches()
     layers_per_pp_stage = model_def.layers_per_pp_stage()
     vpp_penalty = model_def.vpp_penalty()
+    print(f"VPP memory penalty: {vpp_penalty:.2f}")
     act_memory = (
         per_microbatch_per_layer_per_inflight
         * max_inflight_microbatches
@@ -92,23 +93,30 @@ def main() -> None:
     )
 
     _print_section_header("TOTAL MEM")
-    print(f"total mem (GiB) = {(states.total_bytes() + act_memory.bytes()) / (1024 ** 3):.3f}GiB")
+    print(
+        f"total mem (GiB) = {(states.total_bytes_partitioned() + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
+    )
 
     ###################################################################################
     # PERF ANALYSIS
     ###################################################################################
     _print_section_header("GEMMs")
     for proj_name, proj_shape in [
-        ("QKV", model_def.qkv_proj_shape),
-        ("attn_out", model_def.attn_out_proj_shape),
-        ("MLP1", model_def.mlp_up_proj_shape),
-        ("MLP2", model_def.mlp_down_proj_shape),
+        ("QKV", model_def.qkv_weight.shape(partitioned=False)),
+        ("attn_out", model_def.attn_out_weight.shape(partitioned=False)),
+        ("MLP1", model_def.mlp_up_weight.shape(partitioned=False)),
+        ("MLP2", model_def.mlp_down_weight.shape(partitioned=False)),
     ]:
         tflops = compute_gemm_tflops(
-            proj_shape, seqlen=model_def.sequence_len, batch_sz=model_def.microbatch_sz,
+            proj_shape,
+            seqlen=model_def.sequence_len,
+            batch_sz=model_def.microbatch_sz,
         )
-        print(f"{proj_name} ({proj_shape}): {tflops:.2f}TFLOPs -> {tflops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_tflops) * 1000:.3f}ms expected runtime")
-
+        print(
+            f"{proj_name} ({proj_shape}): {tflops:.2f}TFLOPs -> "
+            f"{tflops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_tflops) * 1000:.3f}ms expected runtime "
+            f"(with 100% FLOPs utilization)"
+        )
 
     _print_section_header("PIPELINE BUBBLE")
     gbs = cfg["data"]["gbs"]
@@ -118,7 +126,7 @@ def main() -> None:
     n_microbatches = safe_divide(bs_per_dp, mbs)
     print(f"gbs={gbs}")
     print(f"gbs/dp={bs_per_dp}")
-    print(f"VPP multiplier={(1 / vpp):.2f}")
+    print(f"VPP pipeline bubble multiplier={(1 / vpp):.2f}")
     print(
         f"pipeline bubble fraction: {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
     )
@@ -134,15 +142,17 @@ def main() -> None:
             * 2  # factor for backward only (2 GEMMs per op)
             * model_def.microbatch_sz
             * model_def.sequence_len
-            * model_def.get_total_n_params().numel()
+            * model_def.get_total_n_params_unpartitioned()
         ) * 1e-12
 
         # divide by single pipeline stage TFLOPs, since its just for single
         # microbatch there's only one active pipeline stage at a time
         single_microbatch_bwd_time = single_microbatch_bwd_tflops / machine_spec.total_flops()
-        print(f"single microbatch_bwd_time {single_microbatch_bwd_time:.2f}s")
+        print(
+            f"single microbatch bwd compute time {single_microbatch_bwd_time:.2f}s (with 100% FLOPs utilization)"
+        )
 
-        grad_size = states.grads
+        grad_size = states.grads.size(partitioned=True)
         grad_reduce_scatter_vol = get_grad_reducescatter_volume(
             grad_size=grad_size, dp_size=model_def.parallelism_cfg.dp
         )
@@ -155,7 +165,7 @@ def main() -> None:
         print(f"reduce_scatter(grads) time: {grad_reduce_scatter_time_s:.2f}s")
 
     _print_section_header("WEAK SCALING")
-    full_dp_comm_vol_factor = (model_def.parallelism_cfg.dp - 1) /model_def.parallelism_cfg.dp
+    full_dp_comm_vol_factor = (model_def.parallelism_cfg.dp - 1) / model_def.parallelism_cfg.dp
     for dp in range(1, min(model_def.parallelism_cfg.dp, 8) + 1):
         factor = (dp - 1) / dp
         print(f"DP={dp} -> {(factor / full_dp_comm_vol_factor) * 100:.2f}% scaling degradation")

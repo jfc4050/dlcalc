@@ -1,9 +1,9 @@
 import dataclasses
 from enum import Enum
 
-from .math import product, safe_divide
-from .size import Size
 from .configurations import ActivationCheckpointingType
+from .math import product, safe_divide
+from .size import Size, TensorRepr
 
 
 @dataclasses.dataclass
@@ -37,38 +37,52 @@ class DistributedAdamOptimizerStates:
     """
 
     def __init__(self, n_params: int, store_param_remainders: bool, dp: int) -> None:
-        self.param_shard = Size(
-            n_params / dp,
+        self.param_shard = TensorRepr(
+            shape=(n_params,),
+            partition_degree=dp,
             # storing param remainders means that the optimizer stores the extra
-            # 16 bits 
-            bytes_per_element=2 if store_param_remainders else 4
+            # 16 bits
+            bits_per_elt=16 if store_param_remainders else 32,
+            enforce_evenly_partitionable=False,
         )
-        self.exp_avg_shard = Size(n_params / dp, bytes_per_element=4)
-        self.exp_avg_sq_shard = Size(n_params / dp, bytes_per_element=4)
+        self.exp_avg_shard = TensorRepr(
+            shape=(n_params,),
+            partition_degree=dp,
+            bits_per_elt=32,
+            enforce_evenly_partitionable=False,
+        )
+        self.exp_avg_sq_shard = TensorRepr(
+            shape=(n_params,),
+            partition_degree=dp,
+            bits_per_elt=32,
+            enforce_evenly_partitionable=False,
+        )
 
 
 class States:
-    def __init__(self, params: Size, grads: Size, optim_states: Size) -> None:
+    def __init__(self, params: TensorRepr, grads: TensorRepr, optim_states: TensorRepr) -> None:
         self.params = params
         self.grads = grads
         self.optim_states = optim_states
 
-    def total_bytes(self) -> int:
+    def total_bytes_partitioned(self) -> int:
         return sum(
             [
-                self.params.bytes(),
-                self.grads.bytes() if self.grads is not None else 0,
-                self.optim_states.bytes() if self.optim_states is not None else 0,
+                self.params.size(partitioned=True).bytes(),
+                self.grads.size(partitioned=True).bytes() if self.grads is not None else 0,
+                self.optim_states.size(partitioned=True).bytes()
+                if self.optim_states is not None
+                else 0,
             ]
         )
 
     def __repr__(self) -> str:
         return "\n".join(
             [
-                f"params       : {self.params}",
-                f"grads        : {self.grads}",
-                f"optim_states : {self.optim_states}",
-                f"TOTAL        : {self.total_bytes() / (1024 ** 3):.2f}GiB",
+                f"params       : {self.params.size(partitioned=True)}",
+                f"grads        : {self.grads.size(partitioned=True)}",
+                f"optim_states : {self.optim_states.size(partitioned=True)}",
+                f"TOTAL        : {self.total_bytes_partitioned() / (1024 ** 3):.2f}GiB",
             ]
         )
 
@@ -102,15 +116,54 @@ class ThreeDParallelModel:
     act_ckpting_type: ActivationCheckpointingType
 
     # TODO. assuming mixed precision here.
-    bytes_per_parameter: int = 2
-    bytes_per_grad: int = 4
-    bytes_per_optim_state: int = 4
+    bits_per_parameter: int = 16
+    bits_per_grad: int = 32
+    bits_per_optim_state: int = 32
 
     def __post_init__(self) -> None:
-        self.qkv_proj_shape = (self.hidden_sz, (self.n_q_heads + 2 * self.n_kv_heads) * self.head_dim)
-        self.attn_out_proj_shape = (self.hidden_sz, self.hidden_sz)
-        self.mlp_up_proj_shape = (self.hidden_sz, (self.inter_sz * 2) if self.glu else self.inter_sz)
-        self.mlp_down_proj_shape = (self.inter_sz, self.hidden_sz)
+        self.embed_weight = TensorRepr(
+            unpartitioned_shape=(self.hidden_sz, self.vocab_sz),
+            partition_degree=self.parallelism_cfg.tp,
+            bits_per_elt=self.bits_per_parameter,
+        )
+        self.norm1_weight = TensorRepr(
+            unpartitioned_shape=(self.hidden_sz,),
+            partition_degree=1,
+            bits_per_elt=self.bits_per_parameter,
+        )
+        self.qkv_weight = TensorRepr(
+            unpartitioned_shape=(
+                self.hidden_sz,
+                (self.n_q_heads + 2 * self.n_kv_heads) * self.head_dim,
+            ),
+            partition_degree=self.parallelism_cfg.tp,
+            bits_per_elt=self.bits_per_parameter,
+        )
+        self.attn_out_weight = TensorRepr(
+            unpartitioned_shape=(self.hidden_sz, self.hidden_sz),
+            partition_degree=self.parallelism_cfg.tp,
+            bits_per_elt=self.bits_per_parameter,
+        )
+        self.mlp_up_weight = TensorRepr(
+            # following common practice of merging up + gate matmuls in the event
+            # we're using GLU.
+            unpartitioned_shape=(
+                self.hidden_sz,
+                (self.inter_sz * 2) if self.glu else self.inter_sz,
+            ),
+            partition_degree=self.parallelism_cfg.tp,
+            bits_per_elt=self.bits_per_parameter,
+        )
+        self.mlp_down_weight = TensorRepr(
+            unpartitioned_shape=(self.inter_sz, self.hidden_sz),
+            partition_degree=self.parallelism_cfg.tp,
+            bits_per_elt=self.bits_per_parameter,
+        )
+        self.norm2_weight = TensorRepr(
+            unpartitioned_shape=(self.hidden_sz,),
+            partition_degree=1,
+            bits_per_elt=self.bits_per_parameter,
+        )
 
         if self.n_layers % (self.parallelism_cfg.pp * self.parallelism_cfg.vpp) != 0:
             raise ValueError(
@@ -118,70 +171,63 @@ class ThreeDParallelModel:
                 f"of PP={self.parallelism_cfg.pp} and VPP={self.parallelism_cfg.vpp}"
             )
 
-    def get_transformer_block_n_params(self) -> Size:
-        numel = _sum(
-            # norm1,
-            self.hidden_sz,
-            # qkv_proj (col parallel)
-            product(self.qkv_proj_shape),
-            # attn out_proj (row parallel)
-            product(self.attn_out_proj_shape),
-            # norm2
-            self.hidden_sz,
-            # MLP layer 1 (col parallel)
-            product(self.mlp_up_proj_shape),
-            # MLP layer 2 (row parallel)
-            product(self.mlp_down_proj_shape),
-        )
+    def get_total_n_params_unpartitioned(self) -> int:
+        return 2 * self.__get_embedding_or_lm_head_size(
+            partitioned=False
+        ) + self.n_layers * self.__get_transformer_block_n_params(partitioned=False)
 
-        return Size(numel=numel, bytes_per_element=self.bytes_per_parameter)
-
-    def get_embedding_or_lm_head_n_params(self) -> Size:
-        return Size(
-            numel=self.hidden_sz * self.vocab_sz / self.parallelism_cfg.tp,
-            bytes_per_element=self.bytes_per_parameter,
-        )
-
-    def get_total_n_params(self) -> Size:
-        return 2 * self.get_embedding_or_lm_head_n_params() + self.n_layers * self.get_transformer_block_n_params()
-
-    def get_states(self, training: bool) -> States:
-        params_in_most_loaded_pp_stage = (
-            self.get_embedding_or_lm_head_n_params()
-            + self.layers_per_pp_stage() * self.get_transformer_block_n_params()
-        ).numel()
-        tp_params_most_loaded_pp_stage = params_in_most_loaded_pp_stage / self.parallelism_cfg.tp
+    def get_partitioned_states(self, training: bool) -> States:
+        n_params_most_loaded_pp_stage = self.__get_embedding_or_lm_head_size(
+            partitioned=True
+        ) + self.layers_per_pp_stage() * self.__get_transformer_block_n_params(partitioned=True)
 
         if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
             raise NotImplementedError
 
         return States(
-            params=Size(
-                numel=tp_params_most_loaded_pp_stage,
-                bytes_per_element=self.bytes_per_parameter,
+            params=TensorRepr(
+                unpartitioned_shape=(n_params_most_loaded_pp_stage,),
+                partition_degree=self.parallelism_cfg.dp,
+                bits_per_elt=self.bits_per_parameter,
+                enforce_evenly_partitionable=False,
             ),
             # for gradient and optimizer partitioning, see
             # https://github.com/NVIDIA/apex/blob/master/apex/contrib/optimizers/distributed_fused_adam.py
             # https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
-            grads=Size(
-                numel=tp_params_most_loaded_pp_stage,
-                bytes_per_element=self.bytes_per_grad,
+            grads=TensorRepr(
+                unpartitioned_shape=(n_params_most_loaded_pp_stage,),
+                partition_degree=1,
+                bits_per_elt=self.bits_per_grad,
             )
             if training
             else None,
-            optim_states=Size(
-                numel=3 * tp_params_most_loaded_pp_stage / self.parallelism_cfg.dp,
-                bytes_per_element=self.bytes_per_optim_state,
+            optim_states=TensorRepr(
+                unpartitioned_shape=(3 * n_params_most_loaded_pp_stage,),
+                partition_degree=self.parallelism_cfg.dp,
+                bits_per_elt=self.bits_per_optim_state,
+                enforce_evenly_partitionable=False,
             )
             if training
             else None,
         )
 
+    def __get_embedding_or_lm_head_size(self, partitioned: bool) -> int:
+        return self.embed_weight.size(partitioned=partitioned).numel()
+
+    def __get_transformer_block_n_params(self, partitioned: bool) -> int:
+        return _sum(
+            self.norm1_weight.size(partitioned=partitioned).numel(),
+            self.qkv_weight.size(partitioned=partitioned).numel(),
+            self.attn_out_weight.size(partitioned=partitioned).numel(),
+            self.norm2_weight.size(partitioned=partitioned).numel(),
+            self.mlp_up_weight.size(partitioned=partitioned).numel(),
+            self.mlp_down_weight.size(partitioned=partitioned).numel(),
+        )
+
     def activation_size_per_microbatch_per_layer(self) -> Size:
-        # TODO. assuming half precision here.
         return Size(
             numel=self.__activation_numel_per_microbatch_per_layer(),
-            bytes_per_element=self.bytes_per_parameter,
+            bits_per_element=self.bits_per_parameter,
         )
 
     def max_inflight_microbatches(self) -> int:
@@ -190,19 +236,11 @@ class ThreeDParallelModel:
     def vpp_penalty(self) -> int:
         """interleaved schedule requires storing activations for (1 + (p - 1)/pm)
         more layers."""
+        if self.parallelism_cfg.vpp == 1:
+            return 1.0
+
         return 1 + (self.parallelism_cfg.pp - 1) / (
             self.parallelism_cfg.pp * self.parallelism_cfg.vpp
-        )
-
-    def kv_cache_size(self, gen_batch_sz: int) -> Size:
-        return Size(
-            numel=self.n_layers
-            * 2  # one for each of K and V
-            * gen_batch_sz
-            * self.sequence_len
-            * self.n_kv_heads  # may be different than num heads if GQA, MQA.
-            * self.head_dim,
-            bytes_per_element=self.bytes_per_parameter,
         )
 
     def layers_per_pp_stage(self) -> int:
