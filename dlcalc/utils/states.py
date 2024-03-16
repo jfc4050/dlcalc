@@ -187,7 +187,7 @@ class ThreeDParallelModel:
         return States(
             params=TensorRepr(
                 unpartitioned_shape=(n_params_most_loaded_pp_stage,),
-                partition_degree=self.parallelism_cfg.dp,
+                partition_degree=1,
                 bits_per_elt=self.bits_per_parameter,
                 enforce_evenly_partitionable=False,
             ),
