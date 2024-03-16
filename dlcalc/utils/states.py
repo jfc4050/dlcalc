@@ -2,7 +2,7 @@ import dataclasses
 from enum import Enum
 
 from .configurations import ActivationCheckpointingType
-from .math import product, safe_divide
+from .math import safe_divide
 from .size import Size, TensorRepr
 
 
@@ -32,58 +32,65 @@ class ParallelConfig:
 
 
 class DistributedAdamOptimizerStates:
-    """
+    """Optimizer states from Apex DistributedFusedAdam.
     see: https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
+    and: https://github.com/NVIDIA/apex/blob/master/apex/contrib/optimizers/distributed_fused_adam.py
+
+    NOTE: shards will be larger in reality due to alignment requirements and
+    unfilled buckets.
     """
 
     def __init__(self, n_params: int, store_param_remainders: bool, dp: int) -> None:
         self.param_shard = TensorRepr(
-            shape=(n_params,),
+            unpartitioned_shape=(n_params,),
             partition_degree=dp,
-            # storing param remainders means that the optimizer stores the extra
-            # 16 bits
+            # apex has a optimization to avoid storing information that's redundant
+            # between fp32 and fp16 weights. it can instead store an extra 16
+            # bits of precision, which can be combined with bf16 weights to yield
+            # fp32 weights
             bits_per_elt=16 if store_param_remainders else 32,
             enforce_evenly_partitionable=False,
         )
         self.exp_avg_shard = TensorRepr(
-            shape=(n_params,),
+            unpartitioned_shape=(n_params,),
             partition_degree=dp,
             bits_per_elt=32,
             enforce_evenly_partitionable=False,
         )
         self.exp_avg_sq_shard = TensorRepr(
-            shape=(n_params,),
+            unpartitioned_shape=(n_params,),
             partition_degree=dp,
             bits_per_elt=32,
             enforce_evenly_partitionable=False,
         )
-
-
-class States:
-    def __init__(self, params: TensorRepr, grads: TensorRepr, optim_states: TensorRepr) -> None:
-        self.params = params
-        self.grads = grads
-        self.optim_states = optim_states
-
-    def total_bytes_partitioned(self) -> int:
-        return sum(
-            [
-                self.params.size(partitioned=True).bytes(),
-                self.grads.size(partitioned=True).bytes() if self.grads is not None else 0,
-                self.optim_states.size(partitioned=True).bytes()
-                if self.optim_states is not None
-                else 0,
-            ]
+        # reused for various purposes but at one point it needs to hold
+        # all (i.e. not DP partitioned) parameter gradients, which are accumulated
+        # to until they are reduce-scattered to a gradient shard during the final
+        # microbatch.
+        # basically ZeRO2, but with no reduce-scatter between gradient accumulations.
+        self.grad_buffer = TensorRepr(
+            unpartitioned_shape=(n_params,),
+            partition_degree=1,
+            bits_per_elt=32,
         )
 
     def __repr__(self) -> str:
         return "\n".join(
             [
-                f"params       : {self.params.size(partitioned=True)}",
-                f"grads        : {self.grads.size(partitioned=True)}",
-                f"optim_states : {self.optim_states.size(partitioned=True)}",
-                f"TOTAL        : {self.total_bytes_partitioned() / (1024 ** 3):.2f}GiB",
+                f"params          : {self.param_shard.size(partitioned=True)}",
+                f"exp_avg         : {self.exp_avg_shard.size(partitioned=True)}",
+                f"exp_avg_squared : {self.exp_avg_sq_shard.size(partitioned=True)}",
+                f"grad_buffer     : {self.grad_buffer.size(partitioned=True)}",
+                f"TOTAL           : {self.total_bytes(partitioned=True) / (1024 ** 3):.2f}GiB",
             ]
+        )
+
+    def total_bytes(self, partitioned: bool) -> int:
+        return _sum(
+            self.param_shard.size(partitioned=partitioned).bytes(),
+            self.exp_avg_shard.size(partitioned=partitioned).bytes(),
+            self.exp_avg_sq_shard.size(partitioned=partitioned).bytes(),
+            self.grad_buffer.size(partitioned=partitioned).bytes(),
         )
 
 
@@ -176,7 +183,10 @@ class ThreeDParallelModel:
             partitioned=False
         ) + self.n_layers * self.__get_transformer_block_n_params(partitioned=False)
 
-    def get_partitioned_states(self, training: bool) -> States:
+    def get_partitioned_states(self, training: bool) -> DistributedAdamOptimizerStates:
+        if not training:  # TODO. cleanup
+            raise NotImplementedError
+
         n_params_most_loaded_pp_stage = self.__get_embedding_or_lm_head_size(
             partitioned=True
         ) + self.layers_per_pp_stage() * self.__get_transformer_block_n_params(partitioned=True)
@@ -184,31 +194,10 @@ class ThreeDParallelModel:
         if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
             raise NotImplementedError
 
-        return States(
-            params=TensorRepr(
-                unpartitioned_shape=(n_params_most_loaded_pp_stage,),
-                partition_degree=1,
-                bits_per_elt=self.bits_per_parameter,
-                enforce_evenly_partitionable=False,
-            ),
-            # for gradient and optimizer partitioning, see
-            # https://github.com/NVIDIA/apex/blob/master/apex/contrib/optimizers/distributed_fused_adam.py
-            # https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
-            grads=TensorRepr(
-                unpartitioned_shape=(n_params_most_loaded_pp_stage,),
-                partition_degree=1,
-                bits_per_elt=self.bits_per_grad,
-            )
-            if training
-            else None,
-            optim_states=TensorRepr(
-                unpartitioned_shape=(3 * n_params_most_loaded_pp_stage,),
-                partition_degree=self.parallelism_cfg.dp,
-                bits_per_elt=self.bits_per_optim_state,
-                enforce_evenly_partitionable=False,
-            )
-            if training
-            else None,
+        return DistributedAdamOptimizerStates(
+            n_params=n_params_most_loaded_pp_stage,
+            store_param_remainders=True,  # TODO. should be configurable
+            dp=self.parallelism_cfg.dp,
         )
 
     def __get_embedding_or_lm_head_size(self, partitioned: bool) -> int:

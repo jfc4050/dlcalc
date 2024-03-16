@@ -94,7 +94,7 @@ def main() -> None:
 
     _print_section_header("TOTAL MEM")
     print(
-        f"total mem (GiB) = {(states.total_bytes_partitioned() + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
+        f"total mem (GiB) = {(states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
     )
 
     ###################################################################################
@@ -152,7 +152,7 @@ def main() -> None:
             f"single microbatch bwd compute time {single_microbatch_bwd_time:.2f}s (with 100% FLOPs utilization)"
         )
 
-        grad_size = states.grads.size(partitioned=True)
+        grad_size = states.grad_buffer.size(partitioned=True)
         grad_reduce_scatter_vol = get_grad_reducescatter_volume(
             grad_size=grad_size, dp_size=model_def.parallelism_cfg.dp
         )

@@ -35,8 +35,8 @@ class Size:
 
     def __repr__(self) -> str:
         return (
-            f"numel: {self._numel * 1e-9:.3f}B, "
-            f"bytes: {self._numel * safe_divide(self._bits_per_element, 8) / (1024 ** 3):.3f}GiB"
+            f"numel: {self._numel * 1e-9:.3f} B, "
+            f"bytes: {self._numel * safe_divide(self._bits_per_element, 8) / (1024 ** 3):.3f} GiB"
         )
 
 
