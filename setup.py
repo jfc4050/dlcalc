@@ -7,6 +7,7 @@ setuptools.setup(
     entry_points={
         "console_scripts": [
             "3dmem = dlcalc.training_3d:main",
+            "ckpt-summarize = dlcalc.summarize_checkpoint:main",
         ],
     },
 )
