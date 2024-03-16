@@ -1,16 +1,16 @@
 """CLI tool for estimating performance characteristics of 3D parallel training."""
 
-from argparse import ArgumentParser
 import json
 import math
+from argparse import ArgumentParser
 
 import yaml
 
-from dlcalc.utils.states import ThreeDParallelModel, ParallelConfig
 from dlcalc.utils.comms import get_grad_reducescatter_volume
 from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import compute_gemm_tflops, safe_divide
+from dlcalc.utils.model_3d import ParallelConfig, ThreeDParallelModel
 
 
 def _print_section_header(section_name: str) -> None:

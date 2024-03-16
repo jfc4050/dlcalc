@@ -1,4 +1,4 @@
-from .size import Size
+from .data import Size
 
 
 def get_grad_reducescatter_volume(grad_size: Size, dp_size: int) -> Size:

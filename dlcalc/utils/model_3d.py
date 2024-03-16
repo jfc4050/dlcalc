@@ -2,8 +2,8 @@ import dataclasses
 from enum import Enum
 
 from .configurations import ActivationCheckpointingType
+from .data import Size, TensorRepr
 from .math import safe_divide
-from .size import Size, TensorRepr
 
 
 @dataclasses.dataclass
