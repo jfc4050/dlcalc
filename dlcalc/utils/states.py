@@ -243,7 +243,8 @@ class ThreeDParallelModel:
         sbh = self.sequence_len * self.microbatch_sz * self.hidden_sz
         sbi = self.sequence_len * self.microbatch_sz * self.inter_sz
         sbq = self.sequence_len * self.microbatch_sz * self.n_q_heads * self.head_dim
-        sbkv = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
+        sbk = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
+        sbv = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
 
         if self.act_ckpting_type == ActivationCheckpointingType.FULL:
             return self.__sp_partition_if_on(sbh)  # just the block input
@@ -253,11 +254,11 @@ class ThreeDParallelModel:
                 # - output is recomputed
                 # QKV (col parallel linear)
                 self.__tp_partition(sbq),  # Q - attn input
-                self.__tp_partition(sbkv),  # K - attn input
-                self.__tp_partition(sbkv),  # V - attn input
+                self.__tp_partition(sbk),  # K - attn input
+                self.__tp_partition(sbv),  # V - attn input
                 # ROTARY EMBEDDINGS
                 self.__tp_partition(sbq if self.rotary_embed else 0),  # Q rotary
-                self.__tp_partition(sbkv if self.rotary_embed else 0),  # K rotary
+                self.__tp_partition(sbk if self.rotary_embed else 0),  # K rotary
                 # SELF ATTENTION
                 # - skipping intermediates (checkpointed by FlashAttention)
                 self.__tp_partition(sbh),  # attn output
@@ -288,11 +289,11 @@ class ThreeDParallelModel:
                 self.__sp_partition_if_on(sbh),  # output - QKV input
                 # QKV PROJ (col parallel linear)
                 self.__tp_partition(sbq),  # Q - attn input
-                self.__tp_partition(sbkv),  # K - attn input
-                self.__tp_partition(sbkv),  # V - attn input
+                self.__tp_partition(sbk),  # K - attn input
+                self.__tp_partition(sbv),  # V - attn input
                 # ROTARY EMBEDDINGS
                 self.__tp_partition(sbq if self.rotary_embed else 0),  # Q rotary
-                self.__tp_partition(sbkv if self.rotary_embed else 0),  # K rotary
+                self.__tp_partition(sbk if self.rotary_embed else 0),  # K rotary
                 # SELF ATTENTION
                 # - skipping intermediates (checkpointed by FlashAttention)
                 self.__tp_partition(sbh),  # needed by down proj
