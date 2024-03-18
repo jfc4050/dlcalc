@@ -119,6 +119,7 @@ class ThreeDParallelModel:
     rotary_embed: bool
 
     vocab_sz: int
+    tie_embeddings: bool
 
     act_ckpting_type: ActivationCheckpointingType
 
@@ -178,10 +179,24 @@ class ThreeDParallelModel:
                 f"of PP={self.parallelism_cfg.pp} and VPP={self.parallelism_cfg.vpp}"
             )
 
-    def get_total_n_params_unpartitioned(self) -> int:
-        return 2 * self.__get_embedding_or_lm_head_size(
-            partitioned=False
-        ) + self.n_layers * self.__get_transformer_block_n_params(partitioned=False)
+    def get_total_n_params(self, partitioned: bool) -> int:
+        embedding_or_lm_head_n_params = self.__get_embedding_or_lm_head_size(
+            partitioned=partitioned
+        )
+        transformer_block_n_params = self.__get_transformer_block_n_params(partitioned=partitioned)
+
+        if partitioned:
+            # we'll give the number of parameters on the most heavily loaded pipeline stage
+            return (
+                embedding_or_lm_head_n_params
+                + safe_divide(self.n_layers, self.parallelism_cfg.pp) * transformer_block_n_params
+            )
+        else:
+            embedding_or_lm_head_factor = 1 if self.tie_embeddings else 2
+            return (
+                embedding_or_lm_head_factor * embedding_or_lm_head_n_params
+                + self.n_layers * transformer_block_n_params
+            )
 
     def get_partitioned_states(self, training: bool) -> DistributedAdamOptimizerStates:
         if not training:  # TODO. cleanup

@@ -52,6 +52,7 @@ def main() -> None:
         glu=cfg["model"]["glu"],
         rotary_embed=cfg["model"]["rotary_embeds"],
         vocab_sz=cfg["model"]["vocab_sz"],
+        tie_embeddings=cfg["model"]["tie_embeddings"],
         act_ckpting_type=ActivationCheckpointingType.from_str(
             cfg["performance"]["activation_checkpointing_type"]
         ),
@@ -67,7 +68,7 @@ def main() -> None:
     ###################################################################################
 
     _print_section_header("STATES")
-    print(f"total params: {model_def.get_total_n_params_unpartitioned() * 1e-9:.2f}B")
+    print(f"total params: {model_def.get_total_n_params(partitioned=False) * 1e-9:.2f}B")
     states = model_def.get_partitioned_states(training=True)
     print(states)
 
@@ -142,7 +143,7 @@ def main() -> None:
             * 2  # factor for backward only (2 GEMMs per op)
             * model_def.microbatch_sz
             * model_def.sequence_len
-            * model_def.get_total_n_params_unpartitioned()
+            * model_def.get_total_n_params(partitioned=False)
         ) * 1e-12
 
         # divide by single pipeline stage TFLOPs, since its just for single
