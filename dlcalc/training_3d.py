@@ -153,7 +153,7 @@ def main() -> None:
             f"single microbatch bwd compute time {single_microbatch_bwd_time:.2f}s (with 100% FLOPs utilization)"
         )
 
-        grad_size = states.grad_buffer.size(partitioned=True)
+        grad_size = states.opt_states.grad_buffer.size(partitioned=True)
         grad_reduce_scatter_vol = get_grad_reducescatter_volume(
             grad_size=grad_size, dp_size=model_def.parallelism_cfg.dp
         )

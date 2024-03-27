@@ -74,23 +74,38 @@ class DistributedAdamOptimizerStates:
             bits_per_elt=32,
         )
 
-    def __repr__(self) -> str:
-        return "\n".join(
-            [
-                f"params          : {self.param_shard.size(partitioned=True)}",
-                f"exp_avg         : {self.exp_avg_shard.size(partitioned=True)}",
-                f"exp_avg_squared : {self.exp_avg_sq_shard.size(partitioned=True)}",
-                f"grad_buffer     : {self.grad_buffer.size(partitioned=True)}",
-                f"TOTAL           : {self.total_bytes(partitioned=True) / (1024 ** 3):.2f}GiB",
-            ]
-        )
-
     def total_bytes(self, partitioned: bool) -> int:
         return _sum(
             self.param_shard.size(partitioned=partitioned).bytes(),
             self.exp_avg_shard.size(partitioned=partitioned).bytes(),
             self.exp_avg_sq_shard.size(partitioned=partitioned).bytes(),
             self.grad_buffer.size(partitioned=partitioned).bytes(),
+        )
+
+
+@dataclasses.dataclass
+class ModelStates:
+    params_shard: TensorRepr
+    opt_states: DistributedAdamOptimizerStates
+
+    def total_bytes(self, partitioned: bool) -> int:
+        return self.params_shard.size(
+            partitioned=partitioned
+        ).bytes() + self.opt_states.total_bytes(partitioned=partitioned)
+
+    def __repr__(self) -> str:
+        params_bytes = self.params_shard.size(partitioned=True).bytes()
+        opt_states_bytes = self.opt_states.total_bytes(partitioned=True)
+
+        return "\n".join(
+            [
+                f"params          : {self.params_shard.size(partitioned=True)}",
+                f"params (opt)    : {self.opt_states.param_shard.size(partitioned=True)}",
+                f"exp_avg         : {self.opt_states.exp_avg_shard.size(partitioned=True)}",
+                f"exp_avg_squared : {self.opt_states.exp_avg_sq_shard.size(partitioned=True)}",
+                f"grad_buffer     : {self.opt_states.grad_buffer.size(partitioned=True)}",
+                f"TOTAL           : {(params_bytes + opt_states_bytes) / (1024 ** 3):.2f}GiB",
+            ]
         )
 
 
@@ -198,7 +213,7 @@ class ThreeDParallelModel:
                 + self.n_layers * transformer_block_n_params
             )
 
-    def get_partitioned_states(self, training: bool) -> DistributedAdamOptimizerStates:
+    def get_partitioned_states(self, training: bool) -> ModelStates:
         if not training:  # TODO. cleanup
             raise NotImplementedError
 
@@ -209,10 +224,18 @@ class ThreeDParallelModel:
         if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
             raise NotImplementedError
 
-        return DistributedAdamOptimizerStates(
-            n_params=n_params_most_loaded_pp_stage,
-            store_param_remainders=True,  # TODO. should be configurable
-            dp=self.parallelism_cfg.dp,
+        return ModelStates(
+            params_shard=TensorRepr(
+                unpartitioned_shape=(self.get_total_n_params(partitioned=False),),
+                partition_degree=self.parallelism_cfg.mp_degree(),
+                bits_per_elt=self.bits_per_parameter,
+                enforce_evenly_partitionable=False,
+            ),
+            opt_states=DistributedAdamOptimizerStates(
+                n_params=n_params_most_loaded_pp_stage,
+                store_param_remainders=True,  # TODO. should be configurable
+                dp=self.parallelism_cfg.dp,
+            ),
         )
 
     def __get_embedding_or_lm_head_size(self, partitioned: bool) -> int:
