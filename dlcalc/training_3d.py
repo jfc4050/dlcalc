@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 
 import yaml
 
-from dlcalc.utils.comms import get_grad_reducescatter_volume
+from dlcalc.utils.comms import get_reduce_scatter_comm_volume
 from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import compute_gemm_tflops, safe_divide
@@ -154,13 +154,15 @@ def main() -> None:
         )
 
         grad_size = states.opt_states.grad_buffer.size(partitioned=True)
-        grad_reduce_scatter_vol = get_grad_reducescatter_volume(
-            grad_size=grad_size, dp_size=model_def.parallelism_cfg.dp
+        grad_reduce_scatter_vol = get_reduce_scatter_comm_volume(
+            size=grad_size, n_participants=model_def.parallelism_cfg.dp
         )
         # NOTE: assumes duplex = 2x unidirectional
         grad_reduce_scatter_time_s = grad_reduce_scatter_vol.bits() / (
             # divide full BW among devices (which will be part of different DP groups)
-            machine_spec.inter_node_connect.unidirectional_bw_bps / machine_spec.n_devices
+            # TODO. this is a safe assumption vast majority of the time but might
+            # want to handle when this isn't the case.
+            machine_spec.inter_node_connect.unidirectional_bw_bits_per_sec / machine_spec.n_devices
         )
         print(f"reduce_scatter(grads) vol: {grad_reduce_scatter_vol}")
         print(f"reduce_scatter(grads) time: {grad_reduce_scatter_time_s:.2f}s")

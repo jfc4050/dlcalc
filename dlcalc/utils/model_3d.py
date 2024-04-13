@@ -36,13 +36,18 @@ class DistributedAdamOptimizerStates:
     see: https://github.com/NVIDIA/Megatron-LM/blob/main/docs/source/distrib_optimizer.md
     and: https://github.com/NVIDIA/apex/blob/master/apex/contrib/optimizers/distributed_fused_adam.py
 
+    the distributed optimizer recieves a set of parameters to manage that are already
+    model parallel partitioned. Internally, it will additionally partition states
+    over DP, so optimizer states end up being partitioned over MP * DP, but
+    the diestributed optimizer doesn't have any concept of model parallelism.
+
     NOTE: shards will be larger in reality due to alignment requirements and
     unfilled buckets.
     """
 
-    def __init__(self, n_params: int, store_param_remainders: bool, dp: int) -> None:
+    def __init__(self, n_mp_params: int, store_param_remainders: bool, dp: int) -> None:
         self.param_shard = TensorRepr(
-            unpartitioned_shape=(n_params,),
+            unpartitioned_shape=(n_mp_params,),
             partition_degree=dp,
             # apex has a optimization to avoid storing information that's redundant
             # between fp32 and fp16 weights. it can instead store an extra 16
@@ -52,13 +57,13 @@ class DistributedAdamOptimizerStates:
             enforce_evenly_partitionable=False,
         )
         self.exp_avg_shard = TensorRepr(
-            unpartitioned_shape=(n_params,),
+            unpartitioned_shape=(n_mp_params,),
             partition_degree=dp,
             bits_per_elt=32,
             enforce_evenly_partitionable=False,
         )
         self.exp_avg_sq_shard = TensorRepr(
-            unpartitioned_shape=(n_params,),
+            unpartitioned_shape=(n_mp_params,),
             partition_degree=dp,
             bits_per_elt=32,
             enforce_evenly_partitionable=False,
@@ -69,7 +74,7 @@ class DistributedAdamOptimizerStates:
         # microbatch.
         # basically ZeRO2, but with no reduce-scatter between gradient accumulations.
         self.grad_buffer = TensorRepr(
-            unpartitioned_shape=(n_params,),
+            unpartitioned_shape=(n_mp_params,),
             partition_degree=1,
             bits_per_elt=32,
         )
@@ -232,7 +237,7 @@ class ThreeDParallelModel:
                 enforce_evenly_partitionable=False,
             ),
             opt_states=DistributedAdamOptimizerStates(
-                n_params=n_params_most_loaded_pp_stage,
+                n_mp_params=n_params_most_loaded_pp_stage,
                 store_param_remainders=True,  # TODO. should be configurable
                 dp=self.parallelism_cfg.dp,
             ),
