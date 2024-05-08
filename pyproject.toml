@@ -1,2 +1,21 @@
+[project]
+name = "dlcalc"
+readme = "README.md"
+version = "0.1.0"
+authors = [
+    {name = "Justin Chiu", email = "jfc4050@gmail.com"}
+]
+
+[project.scripts]
+3dmem = "dlcalc.training_3d:main"
+ckpt-summarize = "dlcalc.summarize_checkpoint:main"
+
+[tool.setuptools]
+packages = ["dlcalc"]
+
 [tool.ruff]
 line-length = 100
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
