@@ -5,6 +5,10 @@ version = "0.1.0"
 authors = [
     {name = "Justin Chiu", email = "jfc4050@gmail.com"}
 ]
+requires-python = ">=3.9"
+dependencies = [
+    "PyYAML>=6.0.1"
+]
 
 [project.scripts]
 3dmem = "dlcalc.training_3d:main"
