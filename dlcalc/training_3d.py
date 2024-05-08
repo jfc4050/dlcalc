@@ -139,7 +139,9 @@ def main() -> None:
     if model_def.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
+        ###############################################################################
         # compute the backward time for a single microbatch.
+        ###############################################################################
         # NOTE: this is fully sequential, there's no other microbatches to overlap with
         single_microbatch_bwd_tflops = (
             2  # FLOPs/MAC
@@ -157,7 +159,9 @@ def main() -> None:
         )
         print()
 
+        ###############################################################################
         # DP comm times
+        ###############################################################################
         # grads are reduced in full-precision
         # params are all-gathered in half-precision
         mp_params_size = states.params_shard.size(partitioned=True)
