@@ -9,6 +9,10 @@ requires-python = ">=3.9"
 dependencies = [
     "PyYAML>=6.0.1"
 ]
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4.3"
+]
 
 [project.scripts]
 3dmem = "dlcalc.training_3d:main"
