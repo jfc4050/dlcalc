@@ -29,6 +29,7 @@ def summarize(obj: object) -> object:
     else:
         return obj
 
+
 def main():
     parser = ArgumentParser(__doc__)
     parser.add_argument("checkpoint_path")
@@ -38,6 +39,7 @@ def main():
     summarized = summarize(c)
 
     pprint.pprint(summarized, width=120)
+
 
 if __name__ == "__main__":
     main()
