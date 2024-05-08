@@ -21,8 +21,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Lint with Ruff
+      - name: Lint/Format Check with Ruff
         run: |
           pip install ruff
-          ruff --output-format=github .
-    
+          ruff format --check .
+          ruff check --output-format=github .
