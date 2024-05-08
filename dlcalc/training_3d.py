@@ -6,8 +6,9 @@ from argparse import ArgumentParser
 
 import yaml
 
-from dlcalc.utils.comms import get_reduce_scatter_comm_time_s
+from dlcalc.utils.comms import get_reduce_scatter_comm_time_s, get_all_gather_comm_time_s
 from dlcalc.utils.configurations import ActivationCheckpointingType
+from dlcalc.utils.data import Size
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import compute_gemm_tflops, safe_divide
 from dlcalc.utils.model_3d import ParallelConfig, ThreeDParallelModel
@@ -57,6 +58,8 @@ def main() -> None:
             cfg["performance"]["activation_checkpointing_type"]
         ),
     )
+
+    bucket_size_bytes = int(cfg["parallelism"]["bucket_size_mb"] * 1e6)
     machine_spec = MachineSpec.from_str(cfg["hardware"]["node_type"])
     cluster_size = model_def.parallelism_cfg.world_size()
     print(machine_spec)
@@ -152,12 +155,48 @@ def main() -> None:
         print(
             f"single microbatch bwd compute time {single_microbatch_bwd_time:.2f} s (if 100% FLOPs utilization)"
         )
+        print()
 
-        grad_size = states.opt_states.grad_buffer.size(partitioned=True)
-        grad_reduce_scatter_time_s = get_reduce_scatter_comm_time_s(
-            size=grad_size, n_participants=model_def.parallelism_cfg.dp, machine_spec=machine_spec
+        # DP comm times
+        # grads are reduced in full-precision
+        # params are all-gathered in half-precision
+        mp_params_size = states.params_shard.size(partitioned=True)
+        # TODO. precisions here assume we are doing AMP
+        bytes_per_grad = 4
+        bytes_per_param = 2
+        grad_bucket_size = Size(
+            numel=int(bucket_size_bytes / bytes_per_grad), bits_per_element=bytes_per_grad * 8
         )
-        print(f"reduce_scatter(grads) time: {grad_reduce_scatter_time_s:.2f}s")
+        param_bucket_size = Size(
+            numel=int(bucket_size_bytes / bytes_per_param), bits_per_element=bytes_per_param * 8
+        )
+
+        grad_bucket_reduce_scatter_time_s = get_reduce_scatter_comm_time_s(
+            size=grad_bucket_size,
+            n_participants=model_def.parallelism_cfg.dp,
+            machine_spec=machine_spec,
+        )
+        print(f"reduce_scatter(grad_bucket) time: {grad_bucket_reduce_scatter_time_s:.2f}s")
+        param_bucket_all_gather_time_s = get_all_gather_comm_time_s(
+            size=param_bucket_size,
+            n_participants=model_def.parallelism_cfg.dp,
+            machine_spec=machine_spec,
+        )
+        print(f"all_gather(param_bucket) time: {param_bucket_all_gather_time_s:.2f}s")
+        print()
+
+        n_grad_buckets = int(math.ceil(mp_params_size.numel() / grad_bucket_size.numel()))
+        n_param_buckets = int(math.ceil(mp_params_size.numel() / param_bucket_size.numel()))
+        print(f"reduce_scatter n_buckets: {n_grad_buckets}")
+        print(f"all_gather n_buckets: {n_param_buckets}")
+        print()
+
+        print(
+            f"reduce_scatter(all_grads) time: {grad_bucket_reduce_scatter_time_s * n_grad_buckets:.2f}s"
+        )
+        print(
+            f"all_gather(all_params) time: {param_bucket_all_gather_time_s * n_param_buckets:.2f}s"
+        )
 
     _print_section_header("WEAK SCALING")
     full_dp_comm_vol_factor = (model_def.parallelism_cfg.dp - 1) / model_def.parallelism_cfg.dp

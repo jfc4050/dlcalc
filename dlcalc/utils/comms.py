@@ -36,7 +36,7 @@ def get_reduce_scatter_comm_time_s(
     )
 
 
-def get_all_gather_comm_volume_s(size: Size, n_participants: int, machine_spec: MachineSpec) -> int:
+def get_all_gather_comm_time_s(size: Size, n_participants: int, machine_spec: MachineSpec) -> int:
     """assumes ring algorithm."""
     return _ring_ag_or_rs_comm_time_s(
         size, n_participants=n_participants, machine_spec=machine_spec
