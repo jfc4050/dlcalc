@@ -114,9 +114,9 @@ def main() -> None:
             batch_sz=model_def.microbatch_sz,
         )
         print(
-            f"{proj_name} ({proj_shape}): {tflops:.2f}TFLOPs -> "
-            f"{tflops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_tflops) * 1000:.3f}ms expected runtime "
-            f"(with 100% FLOPs utilization)"
+            f"{proj_name} ({proj_shape}): {tflops:.2f} TFLOPs -> "
+            f"{tflops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_tflops) * 1000:.3f} ms runtime "
+            f"(if 100% FLOPs utilization)"
         )
 
     _print_section_header("PIPELINE BUBBLE")
@@ -150,7 +150,7 @@ def main() -> None:
         # microbatch there's only one active pipeline stage at a time
         single_microbatch_bwd_time = single_microbatch_bwd_tflops / machine_spec.total_flops()
         print(
-            f"single microbatch bwd compute time {single_microbatch_bwd_time:.2f}s (with 100% FLOPs utilization)"
+            f"single microbatch bwd compute time {single_microbatch_bwd_time:.2f} s (if 100% FLOPs utilization)"
         )
 
         grad_size = states.opt_states.grad_buffer.size(partitioned=True)
