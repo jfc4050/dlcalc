@@ -8,7 +8,6 @@ import yaml
 
 from dlcalc.utils.comms import get_reduce_scatter_comm_time_s, get_all_gather_comm_time_s
 from dlcalc.utils.configurations import ActivationCheckpointingType
-from dlcalc.utils.data import Size
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import compute_gemm_flops, product, safe_divide
 from dlcalc.utils.model_3d import ParallelConfig, ThreeDParallelModel
