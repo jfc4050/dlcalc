@@ -12,14 +12,7 @@ from dlcalc.utils.data import Size
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import compute_gemm_flops, product, safe_divide
 from dlcalc.utils.model_3d import ParallelConfig, ThreeDParallelModel
-
-
-def _print_section_header(section_name: str) -> None:
-    print()
-    print("--------------------------------------------------------------------------")
-    print(section_name)
-    print("--------------------------------------------------------------------------")
-    pass
+from dlcalc.utils.printing import print_section_header
 
 
 def main() -> None:
@@ -30,7 +23,7 @@ def main() -> None:
     with open(args.cfg_path) as f:
         cfg = yaml.safe_load(f)
 
-    _print_section_header("CONFIG")
+    print_section_header("CONFIG")
     print(json.dumps(cfg, indent=2))
 
     model_def = ThreeDParallelModel(
@@ -70,13 +63,13 @@ def main() -> None:
     # MEMORY ANALYSIS
     ###################################################################################
 
-    _print_section_header("[MEMORY] STATES")
+    print_section_header("[MEMORY] STATES")
     print(f"total params: {model_def.get_total_n_params(partitioned=False) * 1e-9:.2f}B")
     states = model_def.get_partitioned_states(training=True)
     print(states)
 
     # activations
-    _print_section_header("[MEMORY] TRAINING ACTIVATIONS")
+    print_section_header("[MEMORY] TRAINING ACTIVATIONS")
     per_microbatch_per_layer_per_inflight = model_def.activation_size_per_microbatch_per_layer()
     print("act/layer/inflight:", per_microbatch_per_layer_per_inflight)
     max_inflight_microbatches = model_def.max_inflight_microbatches()
@@ -96,7 +89,7 @@ def main() -> None:
         f"{act_memory}"
     )
 
-    _print_section_header("[MEMORY] TOTAL")
+    print_section_header("[MEMORY] TOTAL")
     print(
         f"total mem (GiB) = {(states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
     )
@@ -104,7 +97,7 @@ def main() -> None:
     ###################################################################################
     # PERF ANALYSIS
     ###################################################################################
-    _print_section_header("GEMMs")
+    print_section_header("GEMMs")
     for proj_name, proj_shape in [
         ("QKV", model_def.qkv_weight.shape(partitioned=False)),
         ("attn_out", model_def.attn_out_weight.shape(partitioned=False)),
@@ -116,7 +109,7 @@ def main() -> None:
             seqlen=model_def.sequence_len,
             batch_sz=model_def.microbatch_sz,
         )
-        print(f"{proj_name} ({proj_shape}):")
+        print(f"{proj_name} {proj_shape}:")
         print(
             f"\t{flops * 1e-12:.2f} TFLOPs -> "
             f"{flops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_flops) * 1000:.3f} ms compute time "
@@ -129,7 +122,7 @@ def main() -> None:
             f"(if 100% bandwidth utilization)"
         )
 
-    _print_section_header("PIPELINE BUBBLE")
+    print_section_header("PIPELINE BUBBLE")
     gbs = cfg["data"]["gbs"]
     mbs = cfg["data"]["microbatch_sz"]
     vpp = cfg["parallelism"]["vpp"]
@@ -142,7 +135,7 @@ def main() -> None:
         f"pipeline bubble fraction: {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
     )
 
-    _print_section_header("DP COMMUNICATION")
+    print_section_header("DP COMMUNICATION")
     if model_def.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
@@ -209,7 +202,7 @@ def main() -> None:
             f"all_gather(all_params) time: {param_bucket_all_gather_time_s * n_param_buckets:.2f}s"
         )
 
-    _print_section_header("WEAK SCALING")
+    print_section_header("WEAK SCALING")
     full_dp_comm_vol_factor = (model_def.parallelism_cfg.dp - 1) / model_def.parallelism_cfg.dp
     for dp in range(1, min(model_def.parallelism_cfg.dp, 8) + 1):
         factor = (dp - 1) / dp
