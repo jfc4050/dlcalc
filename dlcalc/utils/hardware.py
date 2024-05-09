@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 
 
 @dataclass
@@ -65,19 +65,7 @@ NEURONLINK_V2_SPEC = LinkSpec(
     latency_sec=float("inf"),  # TODO. not sure, determine empirically.
 )
 
-"""
-EFA:
-v1, v2 both use the same 100Gbps links,
-only difference is that v2 has 32 while v1 has 4
-"""
-EFAV1_SPEC = LinkSpec(
-    unidirectional_bw_bits_per_sec=int(4 * 100 * 1e9),
-    latency_sec=30e-6,
-)
-EFAV2_SPEC = LinkSpec(
-    unidirectional_bw_bits_per_sec=int(32 * 100 * 1e9),
-    latency_sec=30e-6,
-)
+EFA_LATENCY_S = 30e-6
 
 
 @dataclass
@@ -90,23 +78,38 @@ class MachineSpec:
     @staticmethod
     def from_str(str: str) -> "MachineSpec":
         return {
+            # https://aws.amazon.com/ec2/instance-types/p4/
             "p4d.24xlarge": MachineSpec(
                 n_devices=8,
                 device_spec=A100_40G_SPEC,
                 intra_node_connect=NVLINK3_SPEC,
-                inter_node_connect=EFAV1_SPEC,
+                inter_node_connect=LinkSpec(
+                    # spec page reports 400Gbps. assuming that's duplex.
+                    unidirectional_bw_bits_per_sec=int(200e9),
+                    latency_sec=EFA_LATENCY_S,
+                ),
             ),
+            # https://aws.amazon.com/ec2/instance-types/p5/
             "p5.48xlarge": MachineSpec(
                 n_devices=8,
                 device_spec=H100_SPEC,
                 intra_node_connect=NVLINK4_SPEC,
-                inter_node_connect=EFAV2_SPEC,
+                inter_node_connect=LinkSpec(
+                    # spec page reports 3200Gbps. assuming that's duplex.
+                    unidirectional_bw_bits_per_sec=int(1600e9),
+                    latency_sec=EFA_LATENCY_S,
+                ),
             ),
+            # https://aws.amazon.com/ec2/instance-types/trn1/
             "trn1n.32xlarge": MachineSpec(
                 n_devices=32,  # technically 16, but treating neuron cores as devices.
                 device_spec=NEURON_CORE_V2,
                 intra_node_connect=NEURONLINK_V2_SPEC,
-                inter_node_connect=EFAV2_SPEC,
+                inter_node_connect=LinkSpec(
+                    # spec page reports 1600Gbps. assuming that's duplex
+                    unidirectional_bw_bits_per_sec=int(800e9),
+                    latency_sec=EFA_LATENCY_S,
+                ),
             ),
         }[str]
 
