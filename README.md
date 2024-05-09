@@ -17,3 +17,14 @@ we've include a sample config you can try tweaking
 ```bash
 3dtrn examples/llama3_70b.yaml
 ```
+
+## Development
+install development dependencies
+```bash
+pip install -e .[dev]
+```
+
+static checks can be run with
+```bash
+bash checks
+```
