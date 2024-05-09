@@ -15,7 +15,7 @@ dev = [
 ]
 
 [project.scripts]
-3dmem = "dlcalc.training_3d:main"
+3dtrn = "dlcalc.training_3d:main"
 ckpt-summarize = "dlcalc.summarize_checkpoint:main"
 
 [tool.setuptools]

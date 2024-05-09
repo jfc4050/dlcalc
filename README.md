@@ -8,12 +8,12 @@ pip3 install -e .
 ```
 
 ## Tools
-### 3D Training Memory
+### 3D Training Calculator
 ```bash
-3dmem -h
+3dtrn -h
 ```
 
 we've include a sample config you can try tweaking
 ```bash
-3dmem examples/llama3_70b.yaml
+3dtrn examples/llama3_70b.yaml
 ```
