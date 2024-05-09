@@ -84,7 +84,7 @@ def main() -> None:
     max_inflight_microbatches = model_def.max_inflight_microbatches()
     layers_per_pp_stage = model_def.layers_per_pp_stage()
     vpp_penalty = model_def.vpp_penalty()
-    print(f"VPP memory penalty: {vpp_penalty:.2f}")
+    print(f"VPP memory penalty = {vpp_penalty:.2f}")
     act_memory = (
         per_microbatch_per_layer_per_inflight
         * max_inflight_microbatches
@@ -166,11 +166,11 @@ def main() -> None:
     vpp = cfg["parallelism"]["vpp"]
     bs_per_dp = safe_divide(gbs, model_def.parallelism_cfg.dp)
     n_microbatches = safe_divide(bs_per_dp, mbs)
-    print(f"gbs={gbs}")
-    print(f"gbs/dp={bs_per_dp}")
-    print(f"VPP pipeline bubble multiplier={(1 / vpp):.2f}")
+    print(f"gbs = {gbs}")
+    print(f"gbs/pipeline = {bs_per_dp}")
+    print(f"VPP pipeline bubble multiplier = {(1 / vpp):.2f}")
     print(
-        f"pipeline bubble fraction: {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
+        f"pipeline bubble fraction = {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
     )
 
     print_section_header("DP COMMUNICATION")
@@ -211,26 +211,26 @@ def main() -> None:
             n_participants=model_def.parallelism_cfg.dp,
             machine_spec=machine_spec,
         )
-        print(f"reduce_scatter(grad_bucket) time: {grad_bucket_reduce_scatter_time_s:.2f}s")
+        print(f"reduce_scatter(grad_bucket) time = {grad_bucket_reduce_scatter_time_s:.2f}s")
         param_bucket_all_gather_time_s = get_dp_all_gather_comm_time_s(
             size=param_bucket_size,
             n_participants=model_def.parallelism_cfg.dp,
             machine_spec=machine_spec,
         )
-        print(f"all_gather(param_bucket) time: {param_bucket_all_gather_time_s:.2f}s")
+        print(f"all_gather(param_bucket) time = {param_bucket_all_gather_time_s:.2f}s")
         print()
 
         n_grad_buckets = int(math.ceil(mp_params_size.numel() / grad_bucket_size.numel()))
         n_param_buckets = int(math.ceil(mp_params_size.numel() / param_bucket_size.numel()))
-        print(f"reduce_scatter n_buckets: {n_grad_buckets}")
-        print(f"all_gather n_buckets: {n_param_buckets}")
+        print(f"reduce_scatter n_buckets = {n_grad_buckets}")
+        print(f"all_gather n_buckets = {n_param_buckets}")
         print()
 
         print(
-            f"reduce_scatter(all_grads) time: {grad_bucket_reduce_scatter_time_s * n_grad_buckets:.2f}s"
+            f"reduce_scatter(all_grads) time = {grad_bucket_reduce_scatter_time_s * n_grad_buckets:.2f}s"
         )
         print(
-            f"all_gather(all_params) time: {param_bucket_all_gather_time_s * n_param_buckets:.2f}s"
+            f"all_gather(all_params) time = {param_bucket_all_gather_time_s * n_param_buckets:.2f}s"
         )
 
     print_section_header("WEAK SCALING")
