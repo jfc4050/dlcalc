@@ -106,33 +106,45 @@ def main() -> None:
     ###################################################################################
     # PERF ANALYSIS
     ###################################################################################
-    print_section_header("GEMMs")
+    print_section_header("GEMMs (note numbers calculated for 100% flops+bandwidth utilization)")
     for proj_name, weight_repr in [
         ("QKV", model_def.qkv_weight),
-        ("attn_out", model_def.attn_out_weight),
+        ("ATTN_OUT", model_def.attn_out_weight),
         ("MLP1", model_def.mlp_up_weight),
         ("MLP2", model_def.mlp_down_weight),
     ]:
+        weight_partitioned_shape = weight_repr.shape(partitioned=True)
+        weight_unpartitioned_shape = weight_repr.shape(partitioned=False)
         flops = compute_gemm_flops(
-            weight_repr.shape(partitioned=True),
+            weight_partitioned_shape,
             seqlen=model_def.sequence_len,
             batch_sz=model_def.microbatch_sz,
         )
+        print(f"{proj_name} {weight_unpartitioned_shape} --tp--> {weight_partitioned_shape}")
         print(
-            f"{proj_name} {weight_repr.shape(partitioned=False)} -TP-> {weight_repr.shape(partitioned=True)}:"
+            f"\tCOMPUTE: {flops * 1e-12:.2f} TFLOPs -> "
+            f"{flops/machine_spec.device_spec.peak_flops * 1000:.3f} ms"
+        )
+        bytes_per_element = model_def.bits_per_parameter // 8
+        gemm_input_dim, gemm_output_dim = weight_partitioned_shape
+        weight_bytes = bytes_per_element * product(weight_partitioned_shape)
+        input_bytes = bytes_per_element * product(
+            (model_def.sequence_len, model_def.microbatch_sz, gemm_input_dim)
+        )
+        output_bytes = bytes_per_element * product(
+            (model_def.sequence_len, model_def.microbatch_sz, gemm_output_dim)
         )
         print(
-            f"\t{flops * 1e-12:.2f} TFLOPs -> "
-            f"{flops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_flops) * 1000:.3f} ms compute time "
-            f"(if 100% FLOPs utilization)"
-        )
-        weight_bytes = (model_def.bits_per_parameter // 8) * product(
-            weight_repr.shape(partitioned=False)
+            f"\tLOAD INPUT: {input_bytes * 1e-9:.2f} GB -> "
+            f"{input_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms"
         )
         print(
-            f"\t{weight_bytes * 1e-9:.2f} GB -> "
-            f"{weight_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms weight load time "
-            f"(if 100% bandwidth utilization)"
+            f"\tLOAD_WEIGHT: {weight_bytes * 1e-9:.2f} GB -> "
+            f"{weight_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms"
+        )
+        print(
+            f"\tSTORE_OUTPUT: {output_bytes * 1e-9:.2f} GB -> "
+            f"{output_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms"
         )
 
     print_section_header("TP COMMUNICATION")
