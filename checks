@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+ruff format --check .
+ruff check --output-format=github .
+mypy dlcalc/training_3d.py

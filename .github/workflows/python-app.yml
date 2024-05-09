@@ -21,13 +21,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Lint/Format Check with Ruff
+      - name: Static Analysis Checks
         run: |
           pip install ruff
-          ruff format --check .
-          ruff check --output-format=github .
-      - name: MyPy Check
-        run: |
           pip install mypy
           pip install types-PyYAML
-          mypy dlcalc/training_3d.py
+
+          source checks

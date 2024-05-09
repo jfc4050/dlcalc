@@ -4,7 +4,7 @@ random command line tools for deep learning
 
 install CLI
 ```bash
-pip3 install -e .
+pip install -e .
 ```
 
 ## Tools
