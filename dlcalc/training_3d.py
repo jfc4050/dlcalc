@@ -70,13 +70,13 @@ def main() -> None:
     # MEMORY ANALYSIS
     ###################################################################################
 
-    _print_section_header("STATES")
+    _print_section_header("[MEMORY] STATES")
     print(f"total params: {model_def.get_total_n_params(partitioned=False) * 1e-9:.2f}B")
     states = model_def.get_partitioned_states(training=True)
     print(states)
 
     # activations
-    _print_section_header("TRAINING ACTIVATIONS:")
+    _print_section_header("[MEMORY] TRAINING ACTIVATIONS")
     per_microbatch_per_layer_per_inflight = model_def.activation_size_per_microbatch_per_layer()
     print("act/layer/inflight:", per_microbatch_per_layer_per_inflight)
     max_inflight_microbatches = model_def.max_inflight_microbatches()
@@ -96,7 +96,7 @@ def main() -> None:
         f"{act_memory}"
     )
 
-    _print_section_header("TOTAL MEM")
+    _print_section_header("[MEMORY] TOTAL")
     print(
         f"total mem (GiB) = {(states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
     )
@@ -135,7 +135,7 @@ def main() -> None:
         f"pipeline bubble fraction: {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
     )
 
-    _print_section_header("DP COMM")
+    _print_section_header("DP COMMUNICATION")
     if model_def.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
