@@ -84,8 +84,7 @@ class MachineSpec:
                 device_spec=A100_40G_SPEC,
                 intra_node_connect=NVLINK3_SPEC,
                 inter_node_connect=LinkSpec(
-                    # spec page reports 400Gbps. assuming that's duplex.
-                    unidirectional_bw_bits_per_sec=int(200e9),
+                    unidirectional_bw_bits_per_sec=int(400e9),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -95,8 +94,7 @@ class MachineSpec:
                 device_spec=H100_SPEC,
                 intra_node_connect=NVLINK4_SPEC,
                 inter_node_connect=LinkSpec(
-                    # spec page reports 3200Gbps. assuming that's duplex.
-                    unidirectional_bw_bits_per_sec=int(1600e9),
+                    unidirectional_bw_bits_per_sec=int(3200e9),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -106,8 +104,7 @@ class MachineSpec:
                 device_spec=NEURON_CORE_V2,
                 intra_node_connect=NEURONLINK_V2_SPEC,
                 inter_node_connect=LinkSpec(
-                    # spec page reports 1600Gbps. assuming that's duplex
-                    unidirectional_bw_bits_per_sec=int(800e9),
+                    unidirectional_bw_bits_per_sec=int(1600e9),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
