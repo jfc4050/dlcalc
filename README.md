@@ -9,6 +9,8 @@ pip install -e .
 
 ## Tools
 ### 3D Training Calculator
+calculator for estimating various performance characteristics of 3D parallel training
+(memory consumption, pipeline bubble, communication overhead, compute intensity, etc.).
 ```bash
 3dtrn -h
 ```
@@ -16,6 +18,13 @@ pip install -e .
 we've include a sample config you can try tweaking
 ```bash
 3dtrn examples/llama3_70b.yaml
+```
+
+### Checkpoint Summarizer
+gives a human-readable summarization of keys, values, and tensor shapes in
+a given training checkpoint.
+```bash
+ckpt-summarize -h
 ```
 
 ## Development
