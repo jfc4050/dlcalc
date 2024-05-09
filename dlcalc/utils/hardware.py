@@ -10,6 +10,7 @@ class DeviceSpec:
 
 
 A100_40G_SPEC = DeviceSpec(peak_tflops=312, mem_capacity_gib=40)
+H100_SPEC = DeviceSpec(peak_tflops=989, mem_capacity_gib=80)
 NEURON_CORE_V2 = DeviceSpec(peak_tflops=95, mem_capacity_gib=16)
 
 
@@ -61,7 +62,7 @@ EFAV1_SPEC = LinkSpec(
     latency_sec=30e-6,
 )
 EFAV2_SPEC = LinkSpec(
-    unidirectional_bw_bits_per_sec=8 * 100 * 1e9,
+    unidirectional_bw_bits_per_sec=32 * 100 * 1e9,
     latency_sec=30e-6,
 )
 
@@ -81,6 +82,12 @@ class MachineSpec:
                 device_spec=A100_40G_SPEC,
                 intra_node_connect=NVLINK3_SPEC,
                 inter_node_connect=EFAV1_SPEC,
+            ),
+            "p5.48xlarge": MachineSpec(
+                n_devices=8,
+                device_spec=H100_SPEC,
+                intra_node_connect=NVLINK4_SPEC,
+                inter_node_connect=EFAV2_SPEC,
             ),
             "trn1n.32xlarge": MachineSpec(
                 n_devices=32,  # technically 16, but treating neuron cores as devices.
