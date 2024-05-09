@@ -45,6 +45,7 @@ def main() -> None:
         inter_sz=cfg["model"]["inter_sz"],
         glu=cfg["model"]["glu"],
         rotary_embed=cfg["model"]["rotary_embeds"],
+        dropout=cfg["model"]["dropout"],
         vocab_sz=cfg["model"]["vocab_sz"],
         tie_embeddings=cfg["model"]["tie_embeddings"],
         act_ckpting_type=ActivationCheckpointingType.from_str(

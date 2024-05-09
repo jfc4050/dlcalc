@@ -138,6 +138,8 @@ class ThreeDParallelModel:
 
     rotary_embed: bool
 
+    dropout: bool
+
     vocab_sz: int
     tie_embeddings: bool
 
@@ -343,7 +345,7 @@ class ThreeDParallelModel:
                 # DOWN PROJ
                 # - output deallocated (dropout doesn't need to store)
                 # DROPOUT
-                self.__sp_partition_if_on(int(0.5 * sbh)),  # dropout mask
+                self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0,  # dropout mask
                 # -  output deallocated: residual doesn't need to store
                 # RESIDUAL
                 self.__sp_partition_if_on(sbh),  # needed by norm2, resid2
@@ -357,31 +359,16 @@ class ThreeDParallelModel:
                 # MLP DOWN (row parallel linear)
                 # - output deallocated - dropout doesn't need to store
                 # DROPOUT
-                self.__sp_partition_if_on(int(0.5 * sbh)),  # dropout mask
+                self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0,  # dropout mask
                 # - output deallocated - residual doesn't need to store
                 # RESIDUAL
                 # input to next norm1, resid1
                 self.__sp_partition_if_on(sbh),
             )
         elif self.act_ckpting_type == ActivationCheckpointingType.NONE:
-            raise NotImplementedError("not yet implemented")
-            return _sum(
-                # LAYERNORM 1
-                sbh,  # layernorm 1 input
-                # ATTENTION
-                sbh,  # QKV matmul input
-                # skipping Q @ K.T (checkpointed by FlashAttention)
-                # skipping Softmax (checkpointed by FlashAttention)
-                # skipping Softmax dropout (checkpointed by FlashAttention)
-                sbh,  # down proj input.
-                # LAYERNORM 2
-                sbh,  # layernorm 2 input
-                # MLP
-                sbh,  # up/gate input
-                sbi,  # activation input
-                sbi,  # down input TODO. pass inter_sz
-                0.5 * sbh,  # dropout mask
-                # TODO. this is sort of hacky, dropout mask is 1 byte so setting as half numel
+            raise NotImplementedError(
+                "not yet implemented. selective will give a good approximation "
+                "if you use flash attention"
             )
         else:
             raise ValueError(f"unhandled checkpointing_type={self.act_ckpting_type}")
