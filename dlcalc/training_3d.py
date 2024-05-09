@@ -51,9 +51,9 @@ def main() -> None:
         act_ckpting_type=ActivationCheckpointingType.from_str(
             cfg["performance"]["activation_checkpointing_type"]
         ),
+        bucket_size_bytes=int(cfg["parallelism"]["bucket_size_mb"] * 1e6),
     )
 
-    bucket_size_bytes = int(cfg["parallelism"]["bucket_size_mb"] * 1e6)
     machine_spec = MachineSpec.from_str(cfg["hardware"]["node_type"])
     cluster_size = model_def.parallelism_cfg.world_size()
     print(machine_spec)
@@ -66,8 +66,7 @@ def main() -> None:
 
     print_section_header("[MEMORY] STATES")
     print(f"total params: {model_def.get_total_n_params(partitioned=False) * 1e-9:.2f}B")
-    states = model_def.get_partitioned_states(training=True)
-    print(states)
+    print(model_def.states)
 
     # activations
     print_section_header("[MEMORY] TRAINING ACTIVATIONS")
@@ -92,7 +91,7 @@ def main() -> None:
 
     print_section_header("[MEMORY] TOTAL")
     print(
-        f"total mem (GiB) = {(states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
+        f"total mem (GiB) = {(model_def.states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
     )
 
     ###################################################################################
@@ -165,17 +164,10 @@ def main() -> None:
         ###############################################################################
         # grads are reduced in full-precision
         # params are all-gathered in half-precision
-        mp_params_size = states.params_shard.size(partitioned=True)
+        mp_params_size = model_def.states.params_shard.size(partitioned=True)
         # TODO. precisions here assume we are doing AMP
-        bytes_per_grad = 4
-        bytes_per_param = 2
-        grad_bucket_size = Size(
-            numel=int(bucket_size_bytes / bytes_per_grad), bits_per_element=bytes_per_grad * 8
-        )
-        param_bucket_size = Size(
-            numel=int(bucket_size_bytes / bytes_per_param), bits_per_element=bytes_per_param * 8
-        )
-
+        grad_bucket_size = model_def.grad_bucket_size()
+        param_bucket_size = model_def.param_bucket_size()
         grad_bucket_reduce_scatter_time_s = get_reduce_scatter_comm_time_s(
             size=grad_bucket_size,
             n_participants=model_def.parallelism_cfg.dp,

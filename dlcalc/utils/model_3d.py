@@ -145,12 +145,20 @@ class ThreeDParallelModel:
 
     act_ckpting_type: ActivationCheckpointingType
 
+    bucket_size_bytes: int
+
     # TODO. assuming mixed precision here.
     bits_per_parameter: int = 16
     bits_per_grad: int = 32
     bits_per_optim_state: int = 32
 
     def __post_init__(self) -> None:
+        if self.n_layers % (self.parallelism_cfg.pp * self.parallelism_cfg.vpp) != 0:
+            raise ValueError(
+                f"number of layers {self.n_layers} is not divisible by the product "
+                f"of PP={self.parallelism_cfg.pp} and VPP={self.parallelism_cfg.vpp}"
+            )
+
         self.embed_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz, self.vocab_sz),
             partition_degree=self.parallelism_cfg.tp,
@@ -195,11 +203,26 @@ class ThreeDParallelModel:
             bits_per_elt=self.bits_per_parameter,
         )
 
-        if self.n_layers % (self.parallelism_cfg.pp * self.parallelism_cfg.vpp) != 0:
-            raise ValueError(
-                f"number of layers {self.n_layers} is not divisible by the product "
-                f"of PP={self.parallelism_cfg.pp} and VPP={self.parallelism_cfg.vpp}"
-            )
+        n_params_most_loaded_pp_stage = self.__get_embedding_or_lm_head_size(
+            partitioned=True
+        ) + self.layers_per_pp_stage() * self.__get_transformer_block_n_params(partitioned=True)
+
+        if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
+            raise NotImplementedError
+
+        self.states = ModelStates(
+            params_shard=TensorRepr(
+                unpartitioned_shape=(self.get_total_n_params(partitioned=False),),
+                partition_degree=self.parallelism_cfg.mp_degree(),
+                bits_per_elt=self.bits_per_parameter,
+                enforce_evenly_partitionable=False,
+            ),
+            opt_states=DistributedAdamOptimizerStates(
+                n_mp_params=n_params_most_loaded_pp_stage,
+                store_param_remainders=True,  # TODO. should be configurable
+                dp=self.parallelism_cfg.dp,
+            ),
+        )
 
     def get_total_n_params(self, partitioned: bool) -> int:
         embedding_or_lm_head_n_params = self.__get_embedding_or_lm_head_size(
@@ -219,31 +242,6 @@ class ThreeDParallelModel:
                 embedding_or_lm_head_factor * embedding_or_lm_head_n_params
                 + self.n_layers * transformer_block_n_params
             )
-
-    def get_partitioned_states(self, training: bool) -> ModelStates:
-        if not training:  # TODO. cleanup
-            raise NotImplementedError
-
-        n_params_most_loaded_pp_stage = self.__get_embedding_or_lm_head_size(
-            partitioned=True
-        ) + self.layers_per_pp_stage() * self.__get_transformer_block_n_params(partitioned=True)
-
-        if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
-            raise NotImplementedError
-
-        return ModelStates(
-            params_shard=TensorRepr(
-                unpartitioned_shape=(self.get_total_n_params(partitioned=False),),
-                partition_degree=self.parallelism_cfg.mp_degree(),
-                bits_per_elt=self.bits_per_parameter,
-                enforce_evenly_partitionable=False,
-            ),
-            opt_states=DistributedAdamOptimizerStates(
-                n_mp_params=n_params_most_loaded_pp_stage,
-                store_param_remainders=True,  # TODO. should be configurable
-                dp=self.parallelism_cfg.dp,
-            ),
-        )
 
     def __get_embedding_or_lm_head_size(self, partitioned: bool) -> int:
         return self.embed_weight.size(partitioned=partitioned).numel()
@@ -279,6 +277,18 @@ class ThreeDParallelModel:
 
     def layers_per_pp_stage(self) -> int:
         return safe_divide(self.n_layers, self.parallelism_cfg.pp)
+
+    def grad_bucket_size(self) -> Size:
+        return Size(
+            numel=int(self.bucket_size_bytes / (self.bits_per_grad // 8)),
+            bits_per_element=self.bits_per_grad,
+        )
+
+    def param_bucket_size(self) -> Size:
+        return Size(
+            numel=int(self.bucket_size_bytes / (self.bits_per_parameter // 8)),
+            bits_per_element=self.bits_per_parameter,
+        )
 
     def __activation_numel_per_microbatch_per_layer(self) -> int:
         """
