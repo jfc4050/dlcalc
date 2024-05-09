@@ -26,3 +26,8 @@ jobs:
           pip install ruff
           ruff format --check .
           ruff check --output-format=github .
+      - name: MyPy Check
+        run: |
+          pip install mypy
+          pip install types-PyYAML
+          mypy dlcalc/training_3d.py

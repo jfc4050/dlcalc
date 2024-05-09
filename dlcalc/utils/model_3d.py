@@ -265,7 +265,7 @@ class ThreeDParallelModel:
     def max_inflight_microbatches(self) -> int:
         return self.parallelism_cfg.pp
 
-    def vpp_penalty(self) -> int:
+    def vpp_penalty(self) -> float:
         """interleaved schedule requires storing activations for (1 + (p - 1)/pm)
         more layers."""
         if self.parallelism_cfg.vpp == 1:
@@ -343,7 +343,7 @@ class ThreeDParallelModel:
                 # DOWN PROJ
                 # - output deallocated (dropout doesn't need to store)
                 # DROPOUT
-                self.__sp_partition_if_on(0.5 * sbh),  # dropout mask
+                self.__sp_partition_if_on(int(0.5 * sbh)),  # dropout mask
                 # -  output deallocated: residual doesn't need to store
                 # RESIDUAL
                 self.__sp_partition_if_on(sbh),  # needed by norm2, resid2
@@ -357,7 +357,7 @@ class ThreeDParallelModel:
                 # MLP DOWN (row parallel linear)
                 # - output deallocated - dropout doesn't need to store
                 # DROPOUT
-                self.__sp_partition_if_on(0.5 * sbh),  # dropout mask
+                self.__sp_partition_if_on(int(0.5 * sbh)),  # dropout mask
                 # - output deallocated - residual doesn't need to store
                 # RESIDUAL
                 # input to next norm1, resid1

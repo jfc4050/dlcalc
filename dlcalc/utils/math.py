@@ -17,5 +17,5 @@ def product(multiplicands):
     return product
 
 
-def compute_gemm_flops(weight_shape: Tuple[int], seqlen: int, batch_sz: int) -> float:
+def compute_gemm_flops(weight_shape: Tuple[int, ...], seqlen: int, batch_sz: int) -> float:
     return 2 * batch_sz * seqlen * product(weight_shape)

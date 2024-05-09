@@ -11,18 +11,18 @@ class DeviceSpec:
 
 
 A100_40G_SPEC = DeviceSpec(
-    peak_flops=312e12,
-    mem_bandwidth_bytes_per_sec=1.55e12,
+    peak_flops=int(312e12),
+    mem_bandwidth_bytes_per_sec=int(1.55e12),
     mem_capacity_bytes=40 * (1024**3),
 )
 H100_SPEC = DeviceSpec(
-    peak_flops=989e12,
-    mem_bandwidth_bytes_per_sec=3.35e12,
+    peak_flops=int(989e12),
+    mem_bandwidth_bytes_per_sec=int(3.35e12),
     mem_capacity_bytes=80 * (1024**3),
 )
 NEURON_CORE_V2 = DeviceSpec(
-    peak_flops=95e12,
-    mem_bandwidth_bytes_per_sec=0.260e12,
+    peak_flops=int(95e12),
+    mem_bandwidth_bytes_per_sec=int(0.4e12),
     mem_capacity_bytes=16 * (1024**3),
 )
 
@@ -30,7 +30,7 @@ NEURON_CORE_V2 = DeviceSpec(
 @dataclass
 class LinkSpec:
     unidirectional_bw_bits_per_sec: int
-    latency_sec: int
+    latency_sec: float
 
     def __repr__(self) -> str:
         return json.dumps(
@@ -47,15 +47,15 @@ v2, v3, v4 all have links w/ following specs:
 each version only differs by the number of links: v2 -> 6, v3 -> 12, v4 -> 18
 """
 NVLINK2_SPEC = LinkSpec(
-    unidirectional_bw_bits_per_sec=8 * 6.25 * 4 * 6 * 1e9,
+    unidirectional_bw_bits_per_sec=int(8 * 6.25 * 4 * 6 * 1e9),
     latency_sec=3e-6,
 )
 NVLINK3_SPEC = LinkSpec(
-    unidirectional_bw_bits_per_sec=8 * 6.25 * 4 * 12 * 1e9,
+    unidirectional_bw_bits_per_sec=int(8 * 6.25 * 4 * 12 * 1e9),
     latency_sec=3e-6,
 )
 NVLINK4_SPEC = LinkSpec(
-    unidirectional_bw_bits_per_sec=8 * 6.25 * 4 * 18 * 1e9,
+    unidirectional_bw_bits_per_sec=int(8 * 6.25 * 4 * 18 * 1e9),
     latency_sec=3e-6,
 )
 
@@ -71,11 +71,11 @@ v1, v2 both use the same 100Gbps links,
 only difference is that v2 has 32 while v1 has 4
 """
 EFAV1_SPEC = LinkSpec(
-    unidirectional_bw_bits_per_sec=4 * 100 * 1e9,
+    unidirectional_bw_bits_per_sec=int(4 * 100 * 1e9),
     latency_sec=30e-6,
 )
 EFAV2_SPEC = LinkSpec(
-    unidirectional_bw_bits_per_sec=32 * 100 * 1e9,
+    unidirectional_bw_bits_per_sec=int(32 * 100 * 1e9),
     latency_sec=30e-6,
 )
 

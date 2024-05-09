@@ -25,12 +25,12 @@ class Size:
                 f"{self._bits_per_element} vs {other._bits_per_element}"
             )
 
-        return Size(numel=self._numel + other._numel, bits_per_elt=self._bits_per_element)
+        return Size(numel=self._numel + other._numel, bits_per_element=self._bits_per_element)
 
     def __mul__(self, multiplicand) -> "Size":
         return Size(self._numel * multiplicand, self._bits_per_element)
 
-    def __rmul__(self, multiplicand) -> "TensorRepr":
+    def __rmul__(self, multiplicand) -> "Size":
         return Size(self._numel * multiplicand, self._bits_per_element)
 
     def __repr__(self) -> str:
@@ -43,7 +43,7 @@ class Size:
 class TensorRepr:
     def __init__(
         self,
-        unpartitioned_shape: Tuple[int],
+        unpartitioned_shape: Tuple[int, ...],
         partition_degree: int,
         bits_per_elt: int,
         enforce_evenly_partitionable: bool = True,
@@ -57,7 +57,7 @@ class TensorRepr:
         if enforce_evenly_partitionable and self._numel % self._partition_degree != 0:
             raise RuntimeError(f"{self._numel} not divisible by {self._partition_degree}")
 
-    def shape(self, partitioned: bool) -> int:
+    def shape(self, partitioned: bool) -> Tuple[int, ...]:
         if partitioned:
             raise NotImplementedError
         else:
