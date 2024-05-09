@@ -2,4 +2,4 @@
 
 ruff format --check .
 ruff check --output-format=github .
-mypy dlcalc/training_3d.py
+mypy --strict dlcalc/training_3d.py

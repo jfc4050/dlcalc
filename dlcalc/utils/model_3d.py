@@ -114,7 +114,7 @@ class ModelStates:
         )
 
 
-def _sum(*summands):
+def _sum(*summands: int) -> int:
     return sum(list(summands))
 
 

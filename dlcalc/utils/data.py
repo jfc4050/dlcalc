@@ -27,10 +27,10 @@ class Size:
 
         return Size(numel=self._numel + other._numel, bits_per_element=self._bits_per_element)
 
-    def __mul__(self, multiplicand) -> "Size":
+    def __mul__(self, multiplicand: int) -> "Size":
         return Size(self._numel * multiplicand, self._bits_per_element)
 
-    def __rmul__(self, multiplicand) -> "Size":
+    def __rmul__(self, multiplicand: int) -> "Size":
         return Size(self._numel * multiplicand, self._bits_per_element)
 
     def __repr__(self) -> str:

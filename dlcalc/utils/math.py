@@ -8,7 +8,7 @@ def safe_divide(numerator: int, denominator: int) -> int:
     return numerator // denominator
 
 
-def product(multiplicands):
+def product(multiplicands: Tuple[int, ...]) -> int:
     assert len(multiplicands) > 0
     product = 1
     for multiplicand in multiplicands:
