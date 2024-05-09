@@ -107,24 +107,28 @@ def main() -> None:
     # PERF ANALYSIS
     ###################################################################################
     print_section_header("GEMMs")
-    for proj_name, proj_shape in [
-        ("QKV", model_def.qkv_weight.shape(partitioned=False)),
-        ("attn_out", model_def.attn_out_weight.shape(partitioned=False)),
-        ("MLP1", model_def.mlp_up_weight.shape(partitioned=False)),
-        ("MLP2", model_def.mlp_down_weight.shape(partitioned=False)),
+    for proj_name, weight_repr in [
+        ("QKV", model_def.qkv_weight),
+        ("attn_out", model_def.attn_out_weight),
+        ("MLP1", model_def.mlp_up_weight),
+        ("MLP2", model_def.mlp_down_weight),
     ]:
         flops = compute_gemm_flops(
-            proj_shape,
+            weight_repr.shape(partitioned=True),
             seqlen=model_def.sequence_len,
             batch_sz=model_def.microbatch_sz,
         )
-        print(f"{proj_name} {proj_shape}:")
+        print(
+            f"{proj_name} {weight_repr.shape(partitioned=False)} -TP-> {weight_repr.shape(partitioned=True)}:"
+        )
         print(
             f"\t{flops * 1e-12:.2f} TFLOPs -> "
             f"{flops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_flops) * 1000:.3f} ms compute time "
             f"(if 100% FLOPs utilization)"
         )
-        weight_bytes = (model_def.bits_per_parameter // 8) * product(proj_shape)
+        weight_bytes = (model_def.bits_per_parameter // 8) * product(
+            weight_repr.shape(partitioned=False)
+        )
         print(
             f"\t{weight_bytes * 1e-9:.2f} GB -> "
             f"{weight_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms weight load time "
