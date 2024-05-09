@@ -148,14 +148,14 @@ def main() -> None:
             * 2  # factor for backward only (2 GEMMs per op)
             * model_def.microbatch_sz
             * model_def.sequence_len
-            * model_def.get_total_n_params(partitioned=False)
+            * model_def.get_total_n_params(partitioned=True)
         ) * 1e-12
 
         # divide by single pipeline stage TFLOPs, since its just for single
         # microbatch there's only one active pipeline stage at a time
         single_microbatch_bwd_time = single_microbatch_bwd_tflops / machine_spec.total_flops()
         print(
-            f"single microbatch bwd compute time {single_microbatch_bwd_time:.2f} s (if 100% FLOPs utilization)"
+            f"single MP rank, single microbatch bwd compute time {single_microbatch_bwd_time:.2f} s (if 100% FLOPs utilization)"
         )
         print()
 
