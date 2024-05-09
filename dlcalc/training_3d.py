@@ -6,8 +6,14 @@ from argparse import ArgumentParser
 
 import yaml
 
-from dlcalc.utils.comms import get_reduce_scatter_comm_time_s, get_all_gather_comm_time_s
+from dlcalc.utils.comms import (
+    get_dp_reduce_scatter_comm_time_s,
+    get_dp_all_gather_comm_time_s,
+    get_tp_all_gather_comm_time_s,
+    get_tp_reduce_scatter_comm_time_s,
+)
 from dlcalc.utils.configurations import ActivationCheckpointingType
+from dlcalc.utils.data import Size
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import compute_gemm_flops, product, safe_divide
 from dlcalc.utils.model_3d import ParallelConfig, ThreeDParallelModel
@@ -25,6 +31,10 @@ def main() -> None:
     print_section_header("CONFIG")
     print(json.dumps(cfg, indent=2))
 
+    sequence_len = cfg["data"]["seqlen"]
+    microbatch_sz = cfg["data"]["microbatch_sz"]
+    hidden_sz = cfg["model"]["hidden_sz"]
+
     model_def = ThreeDParallelModel(
         parallelism_cfg=ParallelConfig(
             tp=cfg["parallelism"]["tp"],
@@ -34,9 +44,9 @@ def main() -> None:
             sp_enabled=cfg["parallelism"]["sp"],
             zero_level=ParallelConfig.ZeroLevel(cfg["parallelism"]["zero_level"]),
         ),
-        sequence_len=cfg["data"]["seqlen"],
-        microbatch_sz=cfg["data"]["microbatch_sz"],
-        hidden_sz=cfg["model"]["hidden_sz"],
+        sequence_len=sequence_len,
+        microbatch_sz=microbatch_sz,
+        hidden_sz=hidden_sz,
         n_layers=cfg["model"]["n_layers"],
         n_q_heads=cfg["model"]["n_q_heads"],
         n_kv_heads=cfg["model"]["n_kv_heads"],
@@ -121,6 +131,19 @@ def main() -> None:
             f"(if 100% bandwidth utilization)"
         )
 
+    print_section_header("TP COMMUNICATION")
+    # TODO. assumes SP, analysis pretty similar if not SP though
+    activation_size = Size(
+        numel=sequence_len * microbatch_sz * hidden_sz,
+        bits_per_element=model_def.bits_per_parameter,
+    )
+    print(
+        f"TP all-gather: {activation_size}: {get_tp_all_gather_comm_time_s(size=activation_size, n_participants=model_def.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
+    )
+    print(
+        f"TP reduce-scatter: {activation_size}: {get_tp_reduce_scatter_comm_time_s(size=activation_size, n_participants=model_def.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
+    )
+
     print_section_header("PIPELINE BUBBLE")
     gbs = cfg["data"]["gbs"]
     mbs = cfg["data"]["microbatch_sz"]
@@ -167,13 +190,13 @@ def main() -> None:
         # TODO. precisions here assume we are doing AMP
         grad_bucket_size = model_def.grad_bucket_size()
         param_bucket_size = model_def.param_bucket_size()
-        grad_bucket_reduce_scatter_time_s = get_reduce_scatter_comm_time_s(
+        grad_bucket_reduce_scatter_time_s = get_dp_reduce_scatter_comm_time_s(
             size=grad_bucket_size,
             n_participants=model_def.parallelism_cfg.dp,
             machine_spec=machine_spec,
         )
         print(f"reduce_scatter(grad_bucket) time: {grad_bucket_reduce_scatter_time_s:.2f}s")
-        param_bucket_all_gather_time_s = get_all_gather_comm_time_s(
+        param_bucket_all_gather_time_s = get_dp_all_gather_comm_time_s(
             size=param_bucket_size,
             n_participants=model_def.parallelism_cfg.dp,
             machine_spec=machine_spec,
