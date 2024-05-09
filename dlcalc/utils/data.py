@@ -1,5 +1,5 @@
 import math
-from typing import Tuple
+from typing import Optional, Tuple
 
 from .math import product, safe_divide
 
@@ -44,22 +44,40 @@ class TensorRepr:
     def __init__(
         self,
         unpartitioned_shape: Tuple[int, ...],
+        partition_dim: Optional[int],
         partition_degree: int,
         bits_per_elt: int,
         enforce_evenly_partitionable: bool = True,
     ) -> None:
+        if partition_degree > 1 and partition_dim is None:
+            raise RuntimeError(
+                f"with partition degree {partition_degree}, must specify partition_dim"
+            )
+
+        partition_dim = partition_dim or 0
+
+        if (
+            enforce_evenly_partitionable
+            and unpartitioned_shape[partition_dim] % partition_degree != 0
+        ):
+            raise RuntimeError(
+                f"dim {partition_dim} of {unpartitioned_shape} not divisible by {partition_degree}"
+            )
+
         self._shape = unpartitioned_shape
         self._numel = product(unpartitioned_shape)
+        self._partition_dim = partition_dim
         self._partition_degree = partition_degree
         self._bits_per_elt = bits_per_elt
         self._bytes_per_elt = safe_divide(bits_per_elt, 8)
 
-        if enforce_evenly_partitionable and self._numel % self._partition_degree != 0:
-            raise RuntimeError(f"{self._numel} not divisible by {self._partition_degree}")
-
     def shape(self, partitioned: bool) -> Tuple[int, ...]:
         if partitioned:
-            raise NotImplementedError
+            shape = list(self._shape)
+            shape[self._partition_dim] = safe_divide(
+                shape[self._partition_dim], self._partition_degree
+            )
+            return tuple(shape)
         else:
             return self._shape
 

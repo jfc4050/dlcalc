@@ -48,6 +48,7 @@ class DistributedAdamOptimizerStates:
     def __init__(self, n_mp_params: int, store_param_remainders: bool, dp: int) -> None:
         self.param_shard = TensorRepr(
             unpartitioned_shape=(n_mp_params,),
+            partition_dim=0,
             partition_degree=dp,
             # apex has a optimization to avoid storing information that's redundant
             # between fp32 and fp16 weights. it can instead store an extra 16
@@ -58,12 +59,14 @@ class DistributedAdamOptimizerStates:
         )
         self.exp_avg_shard = TensorRepr(
             unpartitioned_shape=(n_mp_params,),
+            partition_dim=0,
             partition_degree=dp,
             bits_per_elt=32,
             enforce_evenly_partitionable=False,
         )
         self.exp_avg_sq_shard = TensorRepr(
             unpartitioned_shape=(n_mp_params,),
+            partition_dim=0,
             partition_degree=dp,
             bits_per_elt=32,
             enforce_evenly_partitionable=False,
@@ -75,6 +78,7 @@ class DistributedAdamOptimizerStates:
         # basically ZeRO2, but with no reduce-scatter between gradient accumulations.
         self.grad_buffer = TensorRepr(
             unpartitioned_shape=(n_mp_params,),
+            partition_dim=None,
             partition_degree=1,
             bits_per_elt=32,
         )
@@ -161,11 +165,13 @@ class ThreeDParallelModel:
 
         self.embed_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz, self.vocab_sz),
+            partition_dim=1,
             partition_degree=self.parallelism_cfg.tp,
             bits_per_elt=self.bits_per_parameter,
         )
         self.norm1_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz,),
+            partition_dim=None,
             partition_degree=1,
             bits_per_elt=self.bits_per_parameter,
         )
@@ -174,11 +180,13 @@ class ThreeDParallelModel:
                 self.hidden_sz,
                 (self.n_q_heads + 2 * self.n_kv_heads) * self.head_dim,
             ),
+            partition_dim=1,
             partition_degree=self.parallelism_cfg.tp,
             bits_per_elt=self.bits_per_parameter,
         )
         self.attn_out_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz, self.hidden_sz),
+            partition_dim=0,
             partition_degree=self.parallelism_cfg.tp,
             bits_per_elt=self.bits_per_parameter,
         )
@@ -189,16 +197,19 @@ class ThreeDParallelModel:
                 self.hidden_sz,
                 (self.inter_sz * 2) if self.glu else self.inter_sz,
             ),
+            partition_dim=1,
             partition_degree=self.parallelism_cfg.tp,
             bits_per_elt=self.bits_per_parameter,
         )
         self.mlp_down_weight = TensorRepr(
             unpartitioned_shape=(self.inter_sz, self.hidden_sz),
+            partition_dim=0,
             partition_degree=self.parallelism_cfg.tp,
             bits_per_elt=self.bits_per_parameter,
         )
         self.norm2_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz,),
+            partition_dim=None,
             partition_degree=1,
             bits_per_elt=self.bits_per_parameter,
         )
@@ -213,6 +224,7 @@ class ThreeDParallelModel:
         self.states = ModelStates(
             params_shard=TensorRepr(
                 unpartitioned_shape=(self.get_total_n_params(partitioned=False),),
+                partition_dim=0,
                 partition_degree=self.parallelism_cfg.mp_degree(),
                 bits_per_elt=self.bits_per_parameter,
                 enforce_evenly_partitionable=False,
