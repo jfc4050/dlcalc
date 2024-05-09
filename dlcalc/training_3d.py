@@ -10,7 +10,7 @@ from dlcalc.utils.comms import get_reduce_scatter_comm_time_s, get_all_gather_co
 from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.data import Size
 from dlcalc.utils.hardware import MachineSpec
-from dlcalc.utils.math import compute_gemm_tflops, safe_divide
+from dlcalc.utils.math import compute_gemm_flops, safe_divide
 from dlcalc.utils.model_3d import ParallelConfig, ThreeDParallelModel
 
 
@@ -111,14 +111,15 @@ def main() -> None:
         ("MLP1", model_def.mlp_up_weight.shape(partitioned=False)),
         ("MLP2", model_def.mlp_down_weight.shape(partitioned=False)),
     ]:
-        tflops = compute_gemm_tflops(
+        flops = compute_gemm_flops(
             proj_shape,
             seqlen=model_def.sequence_len,
             batch_sz=model_def.microbatch_sz,
         )
         print(
-            f"{proj_name} ({proj_shape}): {tflops:.2f} TFLOPs -> "
-            f"{tflops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_tflops) * 1000:.3f} ms runtime "
+            f"{proj_name} ({proj_shape}):\n"
+            f"\t{flops * 1e-12:.2f} TFLOPs -> "
+            f"{flops/(model_def.parallelism_cfg.tp * machine_spec.device_spec.peak_flops) * 1000:.3f} ms compute time "
             f"(if 100% FLOPs utilization)"
         )
 
@@ -143,17 +144,17 @@ def main() -> None:
         # compute the backward time for a single microbatch.
         ###############################################################################
         # NOTE: this is fully sequential, there's no other microbatches to overlap with
-        single_microbatch_bwd_tflops = (
+        single_microbatch_bwd_flops = (
             2  # FLOPs/MAC
             * 2  # factor for backward only (2 GEMMs per op)
             * model_def.microbatch_sz
             * model_def.sequence_len
             * model_def.get_total_n_params(partitioned=True)
-        ) * 1e-12
+        )
 
         # divide by single pipeline stage TFLOPs, since its just for single
         # microbatch there's only one active pipeline stage at a time
-        single_microbatch_bwd_time = single_microbatch_bwd_tflops / machine_spec.total_flops()
+        single_microbatch_bwd_time = single_microbatch_bwd_flops / machine_spec.total_flops()
         print(
             f"single MP rank, single microbatch bwd compute time {single_microbatch_bwd_time:.2f} s (if 100% FLOPs utilization)"
         )

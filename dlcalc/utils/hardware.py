@@ -5,13 +5,26 @@ import json
 @dataclass
 class DeviceSpec:
     # TODO. make it depend on dtype
-    peak_tflops: int
-    mem_capacity_gib: int
+    peak_flops: int
+    mem_bandwidth_bytes_per_sec: int
+    mem_capacity_bytes: int
 
 
-A100_40G_SPEC = DeviceSpec(peak_tflops=312, mem_capacity_gib=40)
-H100_SPEC = DeviceSpec(peak_tflops=989, mem_capacity_gib=80)
-NEURON_CORE_V2 = DeviceSpec(peak_tflops=95, mem_capacity_gib=16)
+A100_40G_SPEC = DeviceSpec(
+    peak_flops=312e12,
+    mem_bandwidth_bytes_per_sec=1.55e12,
+    mem_capacity_bytes=40 * (1024**3),
+)
+H100_SPEC = DeviceSpec(
+    peak_flops=989e12,
+    mem_bandwidth_bytes_per_sec=3.35e12,
+    mem_capacity_bytes=80 * (1024**3),
+)
+NEURON_CORE_V2 = DeviceSpec(
+    peak_flops=95e12,
+    mem_bandwidth_bytes_per_sec=0.260e12,
+    mem_capacity_bytes=16 * (1024**3),
+)
 
 
 @dataclass
@@ -98,4 +111,4 @@ class MachineSpec:
         }[str]
 
     def total_flops(self) -> int:
-        return self.device_spec.peak_tflops * self.n_devices
+        return self.device_spec.peak_flops * self.n_devices
