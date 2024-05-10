@@ -34,10 +34,11 @@ class MachineSpec:
     @staticmethod
     def from_str(str: str) -> "MachineSpec":
         return {
+            # A100 datasheet: https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf
             # https://aws.amazon.com/ec2/instance-types/p4/
             "p4d.24xlarge": MachineSpec(
                 n_devices=8,
-                # A100-40G
+                # A100-40GiB SXM
                 device_spec=DeviceSpec(
                     peak_flops=int(312e12),
                     # 40GiB HBM2
@@ -58,11 +59,11 @@ class MachineSpec:
             # https://aws.amazon.com/ec2/instance-types/p4/
             "p4de.24xlarge": MachineSpec(
                 n_devices=8,
-                # A100-80G
+                # A100-80GiB SXM
                 device_spec=DeviceSpec(
                     peak_flops=int(312e12),
                     # 80GiB HBM2e
-                    mem_bandwidth_bytes_per_sec=int(1935e9),
+                    mem_bandwidth_bytes_per_sec=int(2039e9),
                     mem_capacity_bytes=40 * (1024**3),
                 ),
                 # NVLink 3
@@ -76,12 +77,13 @@ class MachineSpec:
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
+            # H100 datasheet: https://resources.nvidia.com/en-us-tensor-core/nvidia-tensor-core-gpu-datasheet
             # https://aws.amazon.com/ec2/instance-types/p5/
             "p5.48xlarge": MachineSpec(
                 n_devices=8,
-                # H100
+                # H100 SXM
                 device_spec=DeviceSpec(
-                    peak_flops=int(989e12),
+                    peak_flops=int(989e12),  # (ignore sparsity numbers)
                     # 80 GiB HBM3
                     mem_bandwidth_bytes_per_sec=int(3350e9),
                     mem_capacity_bytes=80 * (1024**3),
@@ -104,12 +106,13 @@ class MachineSpec:
                 # NeuronCore v2
                 device_spec=DeviceSpec(
                     peak_flops=int(95e12),
-                    mem_bandwidth_bytes_per_sec=int(400e9),
+                    # 16 GiB HBM2e
+                    mem_bandwidth_bytes_per_sec=int(410e9),
                     mem_capacity_bytes=16 * (1024**3),
                 ),
                 # NeuronLink v2
                 intra_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(51.5e9),
+                    unidirectional_bw_bytes_per_sec=int(384e9),
                     latency_sec=float("inf"),  # TODO. not sure, figure out empirically
                 ),
                 # EFA v2
