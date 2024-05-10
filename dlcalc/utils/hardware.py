@@ -40,7 +40,8 @@ class MachineSpec:
                 # A100-40G
                 device_spec=DeviceSpec(
                     peak_flops=int(312e12),
-                    mem_bandwidth_bytes_per_sec=int(1.55e12),
+                    # 40GiB HBM2
+                    mem_bandwidth_bytes_per_sec=int(1555e9),
                     mem_capacity_bytes=40 * (1024**3),
                 ),
                 # NVLink 3
@@ -48,7 +49,28 @@ class MachineSpec:
                     unidirectional_bw_bits_per_sec=int(2400e9),
                     latency_sec=3e-6,
                 ),
-                # EFA v1
+                # EFA v1 - 4 x 100 Gbps
+                inter_node_connect=LinkSpec(
+                    unidirectional_bw_bits_per_sec=int(400e9),
+                    latency_sec=EFA_LATENCY_S,
+                ),
+            ),
+            # https://aws.amazon.com/ec2/instance-types/p4/
+            "p4de.24xlarge": MachineSpec(
+                n_devices=8,
+                # A100-80G
+                device_spec=DeviceSpec(
+                    peak_flops=int(312e12),
+                    # 80GiB HBM2e
+                    mem_bandwidth_bytes_per_sec=int(1935e9),
+                    mem_capacity_bytes=40 * (1024**3),
+                ),
+                # NVLink 3
+                intra_node_connect=LinkSpec(
+                    unidirectional_bw_bits_per_sec=int(2400e9),
+                    latency_sec=3e-6,
+                ),
+                # EFA v1 - 4 x 100 Gbps
                 inter_node_connect=LinkSpec(
                     unidirectional_bw_bits_per_sec=int(400e9),
                     latency_sec=EFA_LATENCY_S,
@@ -60,7 +82,8 @@ class MachineSpec:
                 # H100
                 device_spec=DeviceSpec(
                     peak_flops=int(989e12),
-                    mem_bandwidth_bytes_per_sec=int(3.35e12),
+                    # 80 GiB HBM3
+                    mem_bandwidth_bytes_per_sec=int(3350e9),
                     mem_capacity_bytes=80 * (1024**3),
                 ),
                 # NVLink 4
@@ -81,7 +104,7 @@ class MachineSpec:
                 # NeuronCore v2
                 device_spec=DeviceSpec(
                     peak_flops=int(95e12),
-                    mem_bandwidth_bytes_per_sec=int(0.4e12),
+                    mem_bandwidth_bytes_per_sec=int(400e9),
                     mem_capacity_bytes=16 * (1024**3),
                 ),
                 # NeuronLink v2
