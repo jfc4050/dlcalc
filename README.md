@@ -1,4 +1,5 @@
 # dlcalc
+![checks](https://github.com/jfc4050/dlcalc/actions/workflows/python-app.yml/badge.svg)
 
 random command line tools for deep learning
 
