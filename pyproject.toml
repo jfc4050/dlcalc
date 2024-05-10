@@ -1,7 +1,7 @@
 [project]
 name = "dlcalc"
 readme = "README.md"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
     {name = "Justin Chiu", email = "jfc4050@gmail.com"}
 ]
