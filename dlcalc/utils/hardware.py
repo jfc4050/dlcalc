@@ -20,7 +20,10 @@ class LinkSpec:
 
     def __repr__(self) -> str:
         return json.dumps(
-            {"unidirectional bw": f"{self.unidirectional_bw_bytes_per_sec * 1e-9:.2f}GBps"}
+            {
+                "unidirectional bw": f"{self.unidirectional_bw_bytes_per_sec * 1e-9:.2f} GBps",
+                "latency": f"{self.latency_sec * 1e6} us",
+            }
         )
 
 
