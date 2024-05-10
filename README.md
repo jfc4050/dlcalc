@@ -10,8 +10,14 @@ pip install -e .
 
 ## Tools
 ### 3D Training Calculator
-calculator for estimating various performance characteristics of 3D parallel training
-(memory consumption, pipeline bubble, communication overhead, compute intensity, etc.).
+calculator for estimating various performance characteristics of 3D parallel
+transformer model training:
+* memory consumption
+* pipeline bubble
+* communication overhead
+* compute intensity
+* etc..
+
 ```bash
 3dtrn -h
 ```
