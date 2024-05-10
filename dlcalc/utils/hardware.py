@@ -15,12 +15,12 @@ class DeviceSpec:
 
 @dataclass
 class LinkSpec:
-    unidirectional_bw_bits_per_sec: int
+    unidirectional_bw_bytes_per_sec: int
     latency_sec: float
 
     def __repr__(self) -> str:
         return json.dumps(
-            {"unidirectional bw": f"{self.unidirectional_bw_bits_per_sec / 8 * 1e-9:.2f}GBps"}
+            {"unidirectional bw": f"{self.unidirectional_bw_bytes_per_sec * 1e-9:.2f}GBps"}
         )
 
 
@@ -46,12 +46,12 @@ class MachineSpec:
                 ),
                 # NVLink 3
                 intra_node_connect=LinkSpec(
-                    unidirectional_bw_bits_per_sec=int(2400e9),
+                    unidirectional_bw_bytes_per_sec=int(300e9),
                     latency_sec=3e-6,
                 ),
                 # EFA v1 - 4 x 100 Gbps
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bits_per_sec=int(400e9),
+                    unidirectional_bw_bytes_per_sec=int(50e9),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -67,12 +67,12 @@ class MachineSpec:
                 ),
                 # NVLink 3
                 intra_node_connect=LinkSpec(
-                    unidirectional_bw_bits_per_sec=int(2400e9),
+                    unidirectional_bw_bytes_per_sec=int(300e9),
                     latency_sec=3e-6,
                 ),
                 # EFA v1 - 4 x 100 Gbps
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bits_per_sec=int(400e9),
+                    unidirectional_bw_bytes_per_sec=int(50e9),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -88,12 +88,12 @@ class MachineSpec:
                 ),
                 # NVLink 4
                 intra_node_connect=LinkSpec(
-                    unidirectional_bw_bits_per_sec=int(3600e9),
+                    unidirectional_bw_bytes_per_sec=int(450e9),
                     latency_sec=3e-6,
                 ),
                 # EFA v2
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bits_per_sec=int(3200e9),
+                    unidirectional_bw_bytes_per_sec=int(400e9),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -109,12 +109,12 @@ class MachineSpec:
                 ),
                 # NeuronLink v2
                 intra_node_connect=LinkSpec(
-                    unidirectional_bw_bits_per_sec=int(412e9),
+                    unidirectional_bw_bytes_per_sec=int(51.5e9),
                     latency_sec=float("inf"),  # TODO. not sure, figure out empirically
                 ),
                 # EFA v2
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bits_per_sec=int(1600e9),
+                    unidirectional_bw_bytes_per_sec=int(200e9),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
