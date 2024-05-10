@@ -4,7 +4,6 @@
 
 random command line tools for deep learning
 
-install CLI
 ## Installation
 ```bash
 pip install dlcalc
