@@ -70,6 +70,20 @@ def main() -> None:
     print("n_nodes: ", safe_divide(cluster_size, machine_spec.n_devices))
 
     ###################################################################################
+    # DATA
+    ###################################################################################
+    print_section_header("DATA")
+    gbs = cfg["data"]["gbs"]
+    mbs = cfg["data"]["microbatch_sz"]
+
+    bs_per_mp_rank = safe_divide(gbs, model_def.parallelism_cfg.dp)
+    n_microbatches_per_mp_rank = safe_divide(bs_per_mp_rank, mbs)
+
+    print(f"gbs = {gbs}")
+    print(f"gbs/pipeline = {bs_per_mp_rank}")
+    print(f"n_microbatches/pipeline = {n_microbatches_per_mp_rank}")
+
+    ###################################################################################
     # MEMORY ANALYSIS
     ###################################################################################
 
@@ -79,15 +93,17 @@ def main() -> None:
 
     # activations
     print_section_header("[MEMORY] TRAINING ACTIVATIONS")
-    per_microbatch_per_layer_per_inflight = model_def.activation_size_per_microbatch_per_layer()
-    print("act/layer/inflight:", per_microbatch_per_layer_per_inflight)
-    max_inflight_microbatches = model_def.max_inflight_microbatches()
+    act_size_per_layer_per_inflight_microbatch = (
+        model_def.activation_size_per_microbatch_per_layer()
+    )
+    print("act/layer/inflight:", act_size_per_layer_per_inflight_microbatch)
+    max_inflight_microbatches = model_def.parallelism_cfg.pp  # 1F1B
     layers_per_pp_stage = model_def.layers_per_pp_stage()
     vpp_penalty = model_def.vpp_penalty()
     print(f"VPP memory penalty = {vpp_penalty:.2f}")
     act_memory = (
-        per_microbatch_per_layer_per_inflight
-        * max_inflight_microbatches
+        act_size_per_layer_per_inflight_microbatch
+        * max(n_microbatches_per_mp_rank, max_inflight_microbatches)
         * math.ceil(vpp_penalty * layers_per_pp_stage)
     )
     print(
@@ -161,16 +177,14 @@ def main() -> None:
     )
 
     print_section_header("PIPELINE BUBBLE")
-    gbs = cfg["data"]["gbs"]
-    mbs = cfg["data"]["microbatch_sz"]
+
     vpp = cfg["parallelism"]["vpp"]
-    bs_per_dp = safe_divide(gbs, model_def.parallelism_cfg.dp)
-    n_microbatches = safe_divide(bs_per_dp, mbs)
-    print(f"gbs = {gbs}")
-    print(f"gbs/pipeline = {bs_per_dp}")
+    bs_per_mp_rank = safe_divide(gbs, model_def.parallelism_cfg.dp)
+    n_microbatches_per_mp_rank = safe_divide(bs_per_mp_rank, mbs)
+
     print(f"VPP pipeline bubble multiplier = {(1 / vpp):.2f}")
     print(
-        f"pipeline bubble fraction = {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches:.2f}"
+        f"pipeline bubble fraction = {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches_per_mp_rank:.2f}"
     )
 
     print_section_header("DP COMMUNICATION")

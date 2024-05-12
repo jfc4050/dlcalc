@@ -274,9 +274,6 @@ class ThreeDParallelModel:
             bits_per_element=self.bits_per_parameter,
         )
 
-    def max_inflight_microbatches(self) -> int:
-        return self.parallelism_cfg.pp
-
     def vpp_penalty(self) -> float:
         """interleaved schedule requires storing activations for (1 + (p - 1)/pm)
         more layers."""
