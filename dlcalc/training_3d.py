@@ -35,7 +35,7 @@ def main() -> None:
     microbatch_sz = cfg["data"]["microbatch_sz"]
     hidden_sz = cfg["model"]["hidden_sz"]
 
-    model_def = ThreeDParallelModel(
+    model_repr = ThreeDParallelModel(
         parallelism_cfg=ParallelConfig(
             tp=cfg["parallelism"]["tp"],
             pp=cfg["parallelism"]["pp"],
@@ -64,7 +64,7 @@ def main() -> None:
     )
 
     machine_spec = MachineSpec.from_str(cfg["hardware"]["node_type"])
-    cluster_size = model_def.parallelism_cfg.world_size()
+    cluster_size = model_repr.parallelism_cfg.world_size()
     print(machine_spec)
     print("n_devices: ", cluster_size)
     print("n_nodes: ", safe_divide(cluster_size, machine_spec.n_devices))
@@ -76,7 +76,7 @@ def main() -> None:
     gbs = cfg["data"]["gbs"]
     mbs = cfg["data"]["microbatch_sz"]
 
-    bs_per_mp_rank = safe_divide(gbs, model_def.parallelism_cfg.dp)
+    bs_per_mp_rank = safe_divide(gbs, model_repr.parallelism_cfg.dp)
     n_microbatches_per_mp_rank = safe_divide(bs_per_mp_rank, mbs)
 
     print(f"gbs = {gbs}")
@@ -88,18 +88,18 @@ def main() -> None:
     ###################################################################################
 
     print_section_header("[MEMORY] STATES")
-    print(f"total params: {model_def.get_total_n_params(partitioned=False) * 1e-9:.2f}B")
-    print(model_def.states)
+    print(f"total params: {model_repr.get_total_n_params(partitioned=False) * 1e-9:.2f}B")
+    print(model_repr.states)
 
     # activations
     print_section_header("[MEMORY] TRAINING ACTIVATIONS")
     act_size_per_layer_per_inflight_microbatch = (
-        model_def.activation_size_per_microbatch_per_layer()
+        model_repr.activation_size_per_microbatch_per_layer()
     )
     print("act/layer/inflight:", act_size_per_layer_per_inflight_microbatch)
-    max_inflight_microbatches = model_def.parallelism_cfg.pp  # 1F1B
-    layers_per_pp_stage = model_def.layers_per_pp_stage()
-    vpp_penalty = model_def.vpp_penalty()
+    max_inflight_microbatches = model_repr.parallelism_cfg.pp  # 1F1B
+    layers_per_pp_stage = model_repr.layers_per_pp_stage()
+    vpp_penalty = model_repr.vpp_penalty()
     print(f"VPP memory penalty = {vpp_penalty:.2f}")
     act_memory = (
         act_size_per_layer_per_inflight_microbatch
@@ -116,7 +116,7 @@ def main() -> None:
 
     print_section_header("[MEMORY] TOTAL")
     print(
-        f"total mem (GiB) = {(model_def.states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
+        f"total mem (GiB) = {(model_repr.states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
     )
 
     ###################################################################################
@@ -124,31 +124,31 @@ def main() -> None:
     ###################################################################################
     print_section_header("GEMMs (note numbers calculated for 100% flops+bandwidth utilization)")
     for proj_name, weight_repr in [
-        ("QKV", model_def.qkv_weight),
-        ("ATTN_OUT", model_def.attn_out_weight),
-        ("MLP1", model_def.mlp_up_weight),
-        ("MLP2", model_def.mlp_down_weight),
+        ("QKV", model_repr.qkv_weight),
+        ("ATTN_OUT", model_repr.attn_out_weight),
+        ("MLP1", model_repr.mlp_up_weight),
+        ("MLP2", model_repr.mlp_down_weight),
     ]:
         weight_partitioned_shape = weight_repr.shape(partitioned=True)
         weight_unpartitioned_shape = weight_repr.shape(partitioned=False)
         flops = compute_gemm_flops(
             weight_partitioned_shape,
-            seqlen=model_def.sequence_len,
-            batch_sz=model_def.microbatch_sz,
+            seqlen=model_repr.sequence_len,
+            batch_sz=model_repr.microbatch_sz,
         )
         print(f"{proj_name} {weight_unpartitioned_shape} --tp--> {weight_partitioned_shape}")
         print(
             f"\tCOMPUTE: {flops * 1e-12:.2f} TFLOPs -> "
             f"{flops/machine_spec.device_spec.peak_flops * 1000:.3f} ms"
         )
-        bytes_per_element = model_def.bits_per_parameter // 8
+        bytes_per_element = model_repr.bits_per_parameter // 8
         gemm_input_dim, gemm_output_dim = weight_partitioned_shape
         weight_bytes = bytes_per_element * product(weight_partitioned_shape)
         input_bytes = bytes_per_element * product(
-            (model_def.sequence_len, model_def.microbatch_sz, gemm_input_dim)
+            (model_repr.sequence_len, model_repr.microbatch_sz, gemm_input_dim)
         )
         output_bytes = bytes_per_element * product(
-            (model_def.sequence_len, model_def.microbatch_sz, gemm_output_dim)
+            (model_repr.sequence_len, model_repr.microbatch_sz, gemm_output_dim)
         )
         print(
             f"\tLOAD INPUT: {input_bytes * 1e-9:.2f} GB -> "
@@ -167,28 +167,28 @@ def main() -> None:
     # TODO. assumes SP, analysis pretty similar if not SP though
     activation_size = Size(
         numel=sequence_len * microbatch_sz * hidden_sz,
-        bits_per_element=model_def.bits_per_parameter,
+        bits_per_element=model_repr.bits_per_parameter,
     )
     print(
-        f"TP all-gather: {activation_size}: {get_tp_all_gather_comm_time_s(size=activation_size, n_participants=model_def.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
+        f"TP all-gather: {activation_size}: {get_tp_all_gather_comm_time_s(size=activation_size, n_participants=model_repr.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
     )
     print(
-        f"TP reduce-scatter: {activation_size}: {get_tp_reduce_scatter_comm_time_s(size=activation_size, n_participants=model_def.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
+        f"TP reduce-scatter: {activation_size}: {get_tp_reduce_scatter_comm_time_s(size=activation_size, n_participants=model_repr.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
     )
 
     print_section_header("PIPELINE BUBBLE")
 
     vpp = cfg["parallelism"]["vpp"]
-    bs_per_mp_rank = safe_divide(gbs, model_def.parallelism_cfg.dp)
+    bs_per_mp_rank = safe_divide(gbs, model_repr.parallelism_cfg.dp)
     n_microbatches_per_mp_rank = safe_divide(bs_per_mp_rank, mbs)
 
     print(f"VPP pipeline bubble multiplier = {(1 / vpp):.2f}")
     print(
-        f"pipeline bubble fraction = {(1 / vpp) * (model_def.parallelism_cfg.pp - 1) / n_microbatches_per_mp_rank:.2f}"
+        f"pipeline bubble fraction = {(1 / vpp) * (model_repr.parallelism_cfg.pp - 1) / n_microbatches_per_mp_rank:.2f}"
     )
 
     print_section_header("DP COMMUNICATION")
-    if model_def.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
+    if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
         ###############################################################################
@@ -198,9 +198,9 @@ def main() -> None:
         single_microbatch_bwd_flops = (
             2  # FLOPs/MAC
             * 2  # factor for backward only (2 GEMMs per op)
-            * model_def.microbatch_sz
-            * model_def.sequence_len
-            * model_def.get_total_n_params(partitioned=True)
+            * model_repr.microbatch_sz
+            * model_repr.sequence_len
+            * model_repr.get_total_n_params(partitioned=True)
         )
 
         # divide by single pipeline stage TFLOPs, since its just for single
@@ -216,19 +216,19 @@ def main() -> None:
         ###############################################################################
         # grads are reduced in full-precision
         # params are all-gathered in half-precision
-        mp_params_size = model_def.states.params_shard.size(partitioned=True)
+        mp_params_size = model_repr.states.params_shard.size(partitioned=True)
         # TODO. precisions here assume we are doing AMP
-        grad_bucket_size = model_def.grad_bucket_size()
-        param_bucket_size = model_def.param_bucket_size()
+        grad_bucket_size = model_repr.grad_bucket_size()
+        param_bucket_size = model_repr.param_bucket_size()
         grad_bucket_reduce_scatter_time_s = get_dp_reduce_scatter_comm_time_s(
             size=grad_bucket_size,
-            n_participants=model_def.parallelism_cfg.dp,
+            n_participants=model_repr.parallelism_cfg.dp,
             machine_spec=machine_spec,
         )
         print(f"reduce_scatter(grad_bucket) time = {grad_bucket_reduce_scatter_time_s:.2f}s")
         param_bucket_all_gather_time_s = get_dp_all_gather_comm_time_s(
             size=param_bucket_size,
-            n_participants=model_def.parallelism_cfg.dp,
+            n_participants=model_repr.parallelism_cfg.dp,
             machine_spec=machine_spec,
         )
         print(f"all_gather(param_bucket) time = {param_bucket_all_gather_time_s:.2f}s")
@@ -248,8 +248,8 @@ def main() -> None:
         )
 
     print_section_header("WEAK SCALING")
-    full_dp_comm_vol_factor = (model_def.parallelism_cfg.dp - 1) / model_def.parallelism_cfg.dp
-    for dp in range(1, min(model_def.parallelism_cfg.dp, 8) + 1):
+    full_dp_comm_vol_factor = (model_repr.parallelism_cfg.dp - 1) / model_repr.parallelism_cfg.dp
+    for dp in range(1, min(model_repr.parallelism_cfg.dp, 8) + 1):
         factor = (dp - 1) / dp
         print(f"DP={dp} -> {(factor / full_dp_comm_vol_factor) * 100:.2f}% scaling degradation")
     print("...")

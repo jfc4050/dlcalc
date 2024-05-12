@@ -5,6 +5,10 @@ from .math import product, safe_divide
 
 
 class Size:
+    """representation of how much space something takes, which is derived from
+    what the datatype is, and how many elements of that datatype there are.
+    """
+
     def __init__(self, numel: int, bits_per_element: int) -> None:
         self._numel = numel
         self._bits_per_element = bits_per_element
@@ -41,6 +45,10 @@ class Size:
 
 
 class TensorRepr:
+    """Representation of a (possibly distributed) Tensor,
+    has an unpartitioned shape, along with partitioning axes and degree.
+    """
+
     def __init__(
         self,
         unpartitioned_shape: Tuple[int, ...],

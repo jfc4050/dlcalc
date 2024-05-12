@@ -94,6 +94,8 @@ class DistributedAdamOptimizerStates:
 
 @dataclasses.dataclass
 class ModelStates:
+    """Tracks persistent tensor allocations kept throughput training."""
+
     params_shard: TensorRepr
     opt_states: DistributedAdamOptimizerStates
 
@@ -124,6 +126,8 @@ def _sum(*summands: int) -> int:
 
 @dataclasses.dataclass
 class ThreeDParallelModel:
+    """Representation of a 3D parallel transformer model."""
+
     parallelism_cfg: ParallelConfig
 
     sequence_len: int
