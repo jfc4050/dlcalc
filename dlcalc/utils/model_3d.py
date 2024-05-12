@@ -325,8 +325,8 @@ class ThreeDParallelModel:
                 self.__tp_partition(sbk),  # K - attn input
                 self.__tp_partition(sbv),  # V - attn input
                 # ROTARY EMBEDDINGS
-                self.__tp_partition(sbq if self.rotary_embed else 0),  # Q rotary
-                self.__tp_partition(sbk if self.rotary_embed else 0),  # K rotary
+                self.__tp_partition(sbq) if self.rotary_embed else 0,  # Q rotary
+                self.__tp_partition(sbk) if self.rotary_embed else 0,  # K rotary
                 # SELF ATTENTION
                 # - skipping intermediates (checkpointed by FlashAttention)
                 self.__tp_partition(sbh),  # attn output
@@ -360,8 +360,8 @@ class ThreeDParallelModel:
                 self.__tp_partition(sbk),  # K - attn input
                 self.__tp_partition(sbv),  # V - attn input
                 # ROTARY EMBEDDINGS
-                self.__tp_partition(sbq if self.rotary_embed else 0),  # Q rotary
-                self.__tp_partition(sbk if self.rotary_embed else 0),  # K rotary
+                self.__tp_partition(sbq) if self.rotary_embed else 0,  # Q rotary
+                self.__tp_partition(sbk) if self.rotary_embed else 0,  # K rotary
                 # SELF ATTENTION
                 # - skipping intermediates (checkpointed by FlashAttention)
                 self.__tp_partition(sbh),  # needed by down proj
