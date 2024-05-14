@@ -98,19 +98,21 @@ def main() -> None:
     )
     print("act/layer/inflight:", act_size_per_layer_per_inflight_microbatch)
     max_inflight_microbatches = model_repr.parallelism_cfg.pp  # 1F1B
+    print("max(inflight):", max_inflight_microbatches)
     layers_per_pp_stage = model_repr.layers_per_pp_stage()
-    vpp_penalty = model_repr.vpp_penalty()
-    print(f"VPP memory penalty = {vpp_penalty:.2f}")
+    print("layers/pp:", layers_per_pp_stage)
+    vpp_multiplier = model_repr.vpp_penalty()
+    print(f"VPP memory multiplier = {vpp_multiplier:.2f}")
     act_memory = (
         act_size_per_layer_per_inflight_microbatch
-        * max(n_microbatches_per_mp_rank, max_inflight_microbatches)
-        * math.ceil(vpp_penalty * layers_per_pp_stage)
+        * min(n_microbatches_per_mp_rank, max_inflight_microbatches)
+        * math.ceil(vpp_multiplier * layers_per_pp_stage)
     )
     print(
         f"act/pp_stage = "
         f"per_microbatch_per_layer_per_inflight * "
         f"{max_inflight_microbatches} * "
-        f"{math.ceil(vpp_penalty * layers_per_pp_stage)} = "
+        f"{math.ceil(vpp_multiplier * layers_per_pp_stage)} = "
         f"{act_memory}"
     )
 
