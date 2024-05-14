@@ -49,30 +49,38 @@ def get_tp_all_gather_comm_time_s(
 
 
 def get_dp_reduce_scatter_comm_time_s(
-    size: Size, n_participants: int, machine_spec: MachineSpec
+    size: Size,
+    n_participants: int,
+    mp_degree_in_node: int,
+    machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
     return _ring_ag_or_rs_comm_time_s(
         size,
         n_participants=n_participants,
-        # divide full BW among devices (which will be part of different DP groups)
+        # full BW should be divided along all MP ranks within a single node, since
+        # they are each participating in their own DP collectives.
         unidirectional_link_bw_bytes_per_sec=int(
-            machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / machine_spec.n_devices
+            machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / mp_degree_in_node
         ),
         link_latency_s=machine_spec.inter_node_connect.latency_sec,
     )
 
 
 def get_dp_all_gather_comm_time_s(
-    size: Size, n_participants: int, machine_spec: MachineSpec
+    size: Size,
+    n_participants: int,
+    mp_degree_in_node: int,
+    machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
     return _ring_ag_or_rs_comm_time_s(
         size,
         n_participants=n_participants,
-        # divide full BW among devices (which will be part of different DP groups)
+        # full BW should be divided along all MP ranks within a single node, since
+        # they are each participating in their own DP collectives.
         unidirectional_link_bw_bytes_per_sec=int(
-            machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / machine_spec.n_devices
+            machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / mp_degree_in_node
         ),
         link_latency_s=machine_spec.inter_node_connect.latency_sec,
     )

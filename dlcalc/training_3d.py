@@ -220,18 +220,24 @@ def main() -> None:
         # TODO. precisions here assume we are doing AMP
         grad_bucket_size = model_repr.grad_bucket_size()
         param_bucket_size = model_repr.param_bucket_size()
+        # full BW should be divided along all MP ranks within a single node, since
+        # they are each participating in their own DP collectives. We make the
+        # assumption here that TP is the only form of MP we do within node.
+        mp_degree_in_node = model_repr.parallelism_cfg.tp
         grad_bucket_reduce_scatter_time_s = get_dp_reduce_scatter_comm_time_s(
             size=grad_bucket_size,
             n_participants=model_repr.parallelism_cfg.dp,
+            mp_degree_in_node=mp_degree_in_node,
             machine_spec=machine_spec,
         )
-        print(f"reduce_scatter(grad_bucket) time = {grad_bucket_reduce_scatter_time_s:.2f}s")
+        print(f"reduce_scatter(grad_bucket) time = {grad_bucket_reduce_scatter_time_s:.3f}s")
         param_bucket_all_gather_time_s = get_dp_all_gather_comm_time_s(
             size=param_bucket_size,
             n_participants=model_repr.parallelism_cfg.dp,
+            mp_degree_in_node=mp_degree_in_node,
             machine_spec=machine_spec,
         )
-        print(f"all_gather(param_bucket) time = {param_bucket_all_gather_time_s:.2f}s")
+        print(f"all_gather(param_bucket) time = {param_bucket_all_gather_time_s:.3f}s")
         print()
 
         n_grad_buckets = int(math.ceil(mp_params_size.numel() / grad_bucket_size.numel()))
@@ -241,10 +247,10 @@ def main() -> None:
         print()
 
         print(
-            f"reduce_scatter(all_grads) time = {grad_bucket_reduce_scatter_time_s * n_grad_buckets:.2f}s"
+            f"reduce_scatter(all_grads) time = {grad_bucket_reduce_scatter_time_s * n_grad_buckets:.3f}s"
         )
         print(
-            f"all_gather(all_params) time = {param_bucket_all_gather_time_s * n_param_buckets:.2f}s"
+            f"all_gather(all_params) time = {param_bucket_all_gather_time_s * n_param_buckets:.3f}s"
         )
 
     print_section_header("WEAK SCALING")
