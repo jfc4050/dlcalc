@@ -1,6 +1,11 @@
 """
-we assume rings here but this may not always be the case.
-see: https://developer.nvidia.com/blog/massively-scale-deep-learning-training-nccl-2-4/
+Reduce-Scatter:
+* Ring: https://github.com/NVIDIA/nccl/blob/ab2b89c4c339bd7f816fbc114a4b05d386b66290/src/device/reduce_scatter.h#L12-L54
+
+All-Gather:
+* Ring: https://github.com/NVIDIA/nccl/blob/ab2b89c4c339bd7f816fbc114a4b05d386b66290/src/device/all_gather.h#L12-L64
+
+some info on Tree AllReduce (which isn't relevant right now): https://github.com/NVIDIA/nccl/issues/545
 """
 
 from .data import Size
