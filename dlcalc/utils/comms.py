@@ -5,7 +5,10 @@ Reduce-Scatter:
 All-Gather:
 * Ring: https://github.com/NVIDIA/nccl/blob/ab2b89c4c339bd7f816fbc114a4b05d386b66290/src/device/all_gather.h#L12-L64
 
-some info on Tree AllReduce (which isn't relevant for comm patterns we have represented now): https://github.com/NVIDIA/nccl/issues/545
+All-Reduce (not relevant for comm patterns we have represented for now):
+some info on tree AR: https://github.com/NVIDIA/nccl/issues/545
+
+TODO. try to get estimates closer by accounting for NCCL protocols https://github.com/NVIDIA/nccl/issues/281
 """
 
 from .data import Size
