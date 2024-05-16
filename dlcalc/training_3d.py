@@ -224,32 +224,40 @@ def main() -> None:
         mp_params_size = model_repr.states.params_shard.size(partitioned=True)
         # TODO. precisions here assume we are doing AMP
         grad_bucket_size = model_repr.grad_bucket_size()
-        param_bucket_size = model_repr.param_bucket_size()
+        param_bucket_size = Size(
+            numel=grad_bucket_size.numel(), bits_per_element=model_repr.bits_per_parameter
+        )
         n_grad_buckets = int(math.ceil(mp_params_size.numel() / grad_bucket_size.numel()))
         n_param_buckets = int(math.ceil(mp_params_size.numel() / param_bucket_size.numel()))
         print(f"reduce_scatter n_buckets = {n_grad_buckets}")
         print(f"all_gather n_buckets = {n_param_buckets}")
         print()
-        # NOTE: we typically use a "coalescing manager" to launch DP comm for buckets
-        # together, so collective sizes are n_buckets * bucket_size.
         # full BW should be divided along all MP ranks within a single node, since
         # they are each participating in their own DP collectives. We make the
         # assumption here that TP is the only form of MP we do within node.
         mp_degree_in_node = model_repr.parallelism_cfg.tp
         grad_bucket_reduce_scatter_time_s = get_dp_reduce_scatter_comm_time_s(
-            size=grad_bucket_size * n_grad_buckets,
+            size=grad_bucket_size,
             n_participants=model_repr.parallelism_cfg.dp,
             mp_degree_in_node=mp_degree_in_node,
             machine_spec=machine_spec,
         )
         print(f"reduce_scatter(grad_bucket) time = {grad_bucket_reduce_scatter_time_s:.3f}s")
         param_bucket_all_gather_time_s = get_dp_all_gather_comm_time_s(
-            size=param_bucket_size * n_param_buckets,
+            size=param_bucket_size,
             n_participants=model_repr.parallelism_cfg.dp,
             mp_degree_in_node=mp_degree_in_node,
             machine_spec=machine_spec,
         )
         print(f"all_gather(param_bucket) time = {param_bucket_all_gather_time_s:.3f}s")
+        print()
+
+        print(
+            f"reduce_scatter(all_grad_buckets) time = {grad_bucket_reduce_scatter_time_s * n_grad_buckets:.3f}s"
+        )
+        print(
+            f"all_gather(all_param_buckets) time = {param_bucket_all_gather_time_s * n_param_buckets:.3f}s"
+        )
 
     print_section_header("WEAK SCALING")
     full_dp_comm_vol_factor = (model_repr.parallelism_cfg.dp - 1) / model_repr.parallelism_cfg.dp
