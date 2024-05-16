@@ -212,7 +212,8 @@ def main() -> None:
         # microbatch there's only one active pipeline stage at a time
         single_microbatch_bwd_time = single_microbatch_bwd_flops / devices_in_mp_group_flops
         print(
-            f"single MP rank, single microbatch bwd compute time {single_microbatch_bwd_time:.2f} s (if 100% FLOPs utilization)"
+            f"single MP rank, single microbatch bwd compute time {single_microbatch_bwd_time:.2f} s "
+            f"(if 100% FLOPs utilization)"
         )
         print()
 
@@ -242,21 +243,29 @@ def main() -> None:
             mp_degree_in_node=mp_degree_in_node,
             machine_spec=machine_spec,
         )
-        print(f"reduce_scatter(grad_bucket) time = {grad_bucket_reduce_scatter_time_s:.3f}s")
+        print(
+            f"reduce_scatter(1_grad_bucket) time = {grad_bucket_reduce_scatter_time_s:.3f} s "
+            f"(if 100% BW utilization)"
+        )
         param_bucket_all_gather_time_s = get_dp_all_gather_comm_time_s(
             size=param_bucket_size,
             n_participants=model_repr.parallelism_cfg.dp,
             mp_degree_in_node=mp_degree_in_node,
             machine_spec=machine_spec,
         )
-        print(f"all_gather(param_bucket) time = {param_bucket_all_gather_time_s:.3f}s")
+        print(
+            f"all_gather(1_param_bucket) time = {param_bucket_all_gather_time_s:.3f} s "
+            f"(if 100% BW utilization)"
+        )
         print()
 
         print(
-            f"reduce_scatter(all_grad_buckets) time = {grad_bucket_reduce_scatter_time_s * n_grad_buckets:.3f}s"
+            f"reduce_scatter(all_grad_buckets) time = {grad_bucket_reduce_scatter_time_s * n_grad_buckets:.3f} s "
+            f"(if 100% BW utilization)"
         )
         print(
-            f"all_gather(all_param_buckets) time = {param_bucket_all_gather_time_s * n_param_buckets:.3f}s"
+            f"all_gather(all_param_buckets) time = {param_bucket_all_gather_time_s * n_param_buckets:.3f} s "
+            f"(if 100% BW utilization)"
         )
 
     print_section_header("WEAK SCALING")
