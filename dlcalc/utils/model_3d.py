@@ -1,5 +1,6 @@
 import dataclasses
 from enum import Enum
+import math
 
 from .configurations import ActivationCheckpointingType
 from .data import Size, TensorRepr
@@ -291,17 +292,8 @@ class ThreeDParallelModel:
     def layers_per_pp_stage(self) -> int:
         return safe_divide(self.n_layers, self.parallelism_cfg.pp)
 
-    def grad_bucket_size(self) -> Size:
-        return Size(
-            numel=int(self.bucket_size_bytes / (self.bits_per_grad // 8)),
-            bits_per_element=self.bits_per_grad,
-        )
-
-    def param_bucket_size(self) -> Size:
-        return Size(
-            numel=int(self.bucket_size_bytes / (self.bits_per_parameter // 8)),
-            bits_per_element=self.bits_per_parameter,
-        )
+    def grad_bucket_numel(self) -> int:
+        return int(math.ceil(self.bucket_size_bytes / (self.bits_per_grad // 8)))
 
     def __activation_numel_per_microbatch_per_layer(self) -> int:
         """

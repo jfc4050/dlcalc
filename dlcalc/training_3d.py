@@ -224,14 +224,17 @@ def main() -> None:
         # params are all-gathered in half-precision
         mp_params_size = model_repr.states.params_shard.size(partitioned=True)
         # TODO. precisions here assume we are doing AMP
-        grad_bucket_size = model_repr.grad_bucket_size()
-        param_bucket_size = Size(
-            numel=grad_bucket_size.numel(), bits_per_element=model_repr.bits_per_parameter
+        grad_bucket_numel = model_repr.grad_bucket_numel()
+        grad_bucket_size = Size(
+            numel=grad_bucket_numel,
+            bits_per_element=model_repr.bits_per_grad,
         )
-        n_grad_buckets = int(math.ceil(mp_params_size.numel() / grad_bucket_size.numel()))
-        n_param_buckets = int(math.ceil(mp_params_size.numel() / param_bucket_size.numel()))
-        print(f"reduce_scatter n_buckets = {n_grad_buckets}")
-        print(f"all_gather n_buckets = {n_param_buckets}")
+        param_bucket_size = Size(
+            numel=grad_bucket_numel,
+            bits_per_element=model_repr.bits_per_parameter,
+        )
+        n_buckets = int(math.ceil(mp_params_size.numel() / grad_bucket_numel))
+        print(f"reduce_scatter/all_gather n_buckets = {n_buckets}")
         print()
         # full BW should be divided along all MP ranks within a single node, since
         # they are each participating in their own DP collectives. We make the
@@ -260,11 +263,11 @@ def main() -> None:
         print()
 
         print(
-            f"reduce_scatter(all_grad_buckets) time = {grad_bucket_reduce_scatter_time_s * n_grad_buckets:.3f} s "
+            f"reduce_scatter(all_grad_buckets) time = {grad_bucket_reduce_scatter_time_s * n_buckets:.3f} s "
             f"(if 100% BW utilization)"
         )
         print(
-            f"all_gather(all_param_buckets) time = {param_bucket_all_gather_time_s * n_param_buckets:.3f} s "
+            f"all_gather(all_param_buckets) time = {param_bucket_all_gather_time_s * n_buckets:.3f} s "
             f"(if 100% BW utilization)"
         )
 
