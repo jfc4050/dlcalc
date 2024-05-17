@@ -7,7 +7,11 @@ from argparse import ArgumentParser
 import yaml
 
 from dlcalc.utils.comms import (
+    get_dp_reduce_scatter_latency_term_s,
+    get_dp_reduce_scatter_bw_term_s,
     get_dp_reduce_scatter_comm_time_s,
+    get_dp_all_gather_latency_term_s,
+    get_dp_all_gather_bw_term_s,
     get_dp_all_gather_comm_time_s,
     get_tp_all_gather_comm_time_s,
     get_tp_reduce_scatter_comm_time_s,
@@ -240,6 +244,16 @@ def main() -> None:
         # they are each participating in their own DP collectives. We make the
         # assumption here that TP is the only form of MP we do within node.
         mp_degree_in_node = model_repr.parallelism_cfg.tp
+        grad_bucket_reduce_scatter_lat_term_s = get_dp_reduce_scatter_latency_term_s(
+            model_repr.parallelism_cfg.dp,
+            machine_spec=machine_spec,
+        )
+        grad_bucket_reduce_scatter_bw_term_s = get_dp_reduce_scatter_bw_term_s(
+            grad_bucket_size,
+            n_participants=model_repr.parallelism_cfg.dp,
+            mp_degree_in_node=mp_degree_in_node,
+            machine_spec=machine_spec,
+        )
         grad_bucket_reduce_scatter_time_s = get_dp_reduce_scatter_comm_time_s(
             size=grad_bucket_size,
             n_participants=model_repr.parallelism_cfg.dp,
@@ -247,20 +261,33 @@ def main() -> None:
             machine_spec=machine_spec,
         )
         print(
-            f"reduce_scatter(1_grad_bucket) time = {grad_bucket_reduce_scatter_time_s:.3f} s "
-            f"(if 100% BW utilization)"
+            f"reduce_scatter(1_grad_bucket):\n"
+            f"\tlatency term = {grad_bucket_reduce_scatter_lat_term_s:.3f} s\n"
+            f"\tbw term = {grad_bucket_reduce_scatter_bw_term_s:.3f} s (if 100% BW utilization)\n"
+            f"\tTOTAL = {grad_bucket_reduce_scatter_time_s:.3f} s\n"
+        )
+        param_bucket_all_gather_lat_term_s = get_dp_all_gather_latency_term_s(
+            model_repr.parallelism_cfg.dp,
+            machine_spec=machine_spec,
+        )
+        param_bucket_all_gather_bw_term_s = get_dp_all_gather_bw_term_s(
+            param_bucket_size,
+            n_participants=model_repr.parallelism_cfg.dp,
+            mp_degree_in_node=mp_degree_in_node,
+            machine_spec=machine_spec,
         )
         param_bucket_all_gather_time_s = get_dp_all_gather_comm_time_s(
-            size=param_bucket_size,
+            param_bucket_size,
             n_participants=model_repr.parallelism_cfg.dp,
             mp_degree_in_node=mp_degree_in_node,
             machine_spec=machine_spec,
         )
         print(
-            f"all_gather(1_param_bucket) time = {param_bucket_all_gather_time_s:.3f} s "
-            f"(if 100% BW utilization)"
+            f"all_gather(1_param_bucket):\n"
+            f"\tlatency term = {param_bucket_all_gather_lat_term_s:.3f} s\n"
+            f"\tbw term = {param_bucket_all_gather_bw_term_s:.3f} s (if 100% BW utilization)\n"
+            f"\tTOTAL = {param_bucket_all_gather_time_s:.3f} s\n"
         )
-        print()
 
         print(
             f"reduce_scatter(all_grad_buckets) time = {grad_bucket_reduce_scatter_time_s * n_buckets:.3f} s "
