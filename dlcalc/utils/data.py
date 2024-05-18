@@ -1,7 +1,6 @@
-import math
 from typing import Optional, Tuple
 
-from .math import product, safe_divide
+from .math import ceil_divide, product, safe_divide
 
 
 class Size:
@@ -89,6 +88,9 @@ class TensorRepr:
         else:
             return self._shape
 
+    def numel(self, partitioned: bool) -> int:
+        return self.__get_numel(partitioned=partitioned)
+
     def size(self, partitioned: bool) -> Size:
         return Size(
             numel=self.__get_numel(partitioned=partitioned), bits_per_element=self._bits_per_elt
@@ -96,6 +98,6 @@ class TensorRepr:
 
     def __get_numel(self, partitioned: bool) -> int:
         if partitioned:
-            return int(math.ceil(self._numel / self._partition_degree))
+            return ceil_divide(self._numel, self._partition_degree)
         else:
             return self._numel

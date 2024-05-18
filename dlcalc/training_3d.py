@@ -17,9 +17,10 @@ from dlcalc.utils.comms import (
     get_tp_reduce_scatter_comm_time_s,
 )
 from dlcalc.utils.configurations import ActivationCheckpointingType
-from dlcalc.utils.data import Size
+from dlcalc.utils.compute import compute_gemm_flops
+from dlcalc.utils.data import Size, TensorRepr
 from dlcalc.utils.hardware import MachineSpec
-from dlcalc.utils.math import compute_gemm_flops, product, safe_divide
+from dlcalc.utils.math import ceil_divide, product, safe_divide
 from dlcalc.utils.model_3d import ParallelConfig, ThreeDParallelModel
 from dlcalc.utils.printing import print_section_header
 
@@ -135,21 +136,21 @@ def main() -> None:
         ("MLP1", model_repr.mlp_up_weight),
         ("MLP2", model_repr.mlp_down_weight),
     ]:
-        weight_partitioned_shape = weight_repr.shape(partitioned=True)
-        weight_unpartitioned_shape = weight_repr.shape(partitioned=False)
+        weight_repr: TensorRepr  # type: ignore[no-redef]
         flops = compute_gemm_flops(
-            weight_partitioned_shape,
-            seqlen=model_repr.sequence_len,
-            batch_sz=model_repr.microbatch_sz,
+            n_tokens=model_repr.sequence_len * model_repr.microbatch_sz,
+            weight_shape=weight_repr.shape(partitioned=True),
         )
-        print(f"{proj_name} {weight_unpartitioned_shape} --tp--> {weight_partitioned_shape}")
+        print(
+            f"{proj_name} {weight_repr.shape(partitioned=False)} --tp--> {weight_repr.shape(partitioned=True)}"
+        )
         print(
             f"\tCOMPUTE: {flops * 1e-12:.2f} TFLOPs -> "
             f"{flops/machine_spec.device_spec.peak_flops * 1000:.3f} ms"
         )
         bytes_per_element = model_repr.bits_per_parameter // 8
-        gemm_input_dim, gemm_output_dim = weight_partitioned_shape
-        weight_bytes = bytes_per_element * product(weight_partitioned_shape)
+        gemm_input_dim, gemm_output_dim = weight_repr.shape(partitioned=True)
+        weight_bytes = bytes_per_element * weight_repr.numel(partitioned=True)
         input_bytes = bytes_per_element * product(
             (model_repr.sequence_len, model_repr.microbatch_sz, gemm_input_dim)
         )
@@ -237,7 +238,7 @@ def main() -> None:
             numel=grad_bucket_numel,
             bits_per_element=model_repr.bits_per_parameter,
         )
-        n_buckets = int(math.ceil(mp_params_size.numel() / grad_bucket_numel))
+        n_buckets = ceil_divide(mp_params_size.numel(), grad_bucket_numel)
         print(f"reduce_scatter/all_gather n_buckets = {n_buckets}")
         print()
         # full BW should be divided along all MP ranks within a single node, since

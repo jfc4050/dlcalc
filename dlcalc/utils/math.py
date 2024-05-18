@@ -1,3 +1,4 @@
+import math
 from typing import Tuple
 
 
@@ -9,6 +10,11 @@ def safe_divide(numerator: int, denominator: int) -> int:
     return numerator // denominator
 
 
+def ceil_divide(numerator: int, denominator: int) -> int:
+    """return ceil(numerator / denominator)"""
+    return int(math.ceil(numerator / denominator))
+
+
 def product(multiplicands: Tuple[int, ...]) -> int:
     """return the product of a sequence of multiplicands."""
     assert len(multiplicands) > 0
@@ -17,8 +23,3 @@ def product(multiplicands: Tuple[int, ...]) -> int:
         product *= multiplicand
 
     return product
-
-
-def compute_gemm_flops(weight_shape: Tuple[int, ...], seqlen: int, batch_sz: int) -> float:
-    """compute the number of FLOPs in a linear layer. Given by 2MNK."""
-    return 2 * batch_sz * seqlen * product(weight_shape)

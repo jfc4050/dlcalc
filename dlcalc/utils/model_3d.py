@@ -1,10 +1,9 @@
 import dataclasses
 from enum import Enum
-import math
 
 from .configurations import ActivationCheckpointingType
 from .data import Size, TensorRepr
-from .math import safe_divide
+from .math import ceil_divide, safe_divide
 
 
 @dataclasses.dataclass
@@ -293,7 +292,7 @@ class ThreeDParallelModel:
         return safe_divide(self.n_layers, self.parallelism_cfg.pp)
 
     def grad_bucket_numel(self) -> int:
-        return int(math.ceil(self.bucket_size_bytes / (self.bits_per_grad // 8)))
+        return ceil_divide(self.bucket_size_bytes, self.bits_per_grad // 8)
 
     def __activation_numel_per_microbatch_per_layer(self) -> int:
         """
