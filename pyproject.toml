@@ -34,6 +34,12 @@ disallow_untyped_decorators = true
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.lint]
+select = [
+    # isort
+    "I001"
+]
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

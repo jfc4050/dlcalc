@@ -7,17 +7,17 @@ from argparse import ArgumentParser
 import yaml
 
 from dlcalc.utils.comms import (
-    get_dp_reduce_scatter_latency_term_s,
-    get_dp_reduce_scatter_bw_term_s,
-    get_dp_reduce_scatter_comm_time_s,
-    get_dp_all_gather_latency_term_s,
     get_dp_all_gather_bw_term_s,
     get_dp_all_gather_comm_time_s,
+    get_dp_all_gather_latency_term_s,
+    get_dp_reduce_scatter_bw_term_s,
+    get_dp_reduce_scatter_comm_time_s,
+    get_dp_reduce_scatter_latency_term_s,
     get_tp_all_gather_comm_time_s,
     get_tp_reduce_scatter_comm_time_s,
 )
-from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.compute import compute_gemm_flops
+from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.data import Size, TensorRepr
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import ceil_divide, product, safe_divide

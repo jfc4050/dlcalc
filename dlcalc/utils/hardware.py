@@ -1,7 +1,6 @@
 import json
 from dataclasses import dataclass
 
-
 EFA_LATENCY_S = 30e-6
 
 
