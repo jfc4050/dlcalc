@@ -238,8 +238,8 @@ def main() -> None:
             numel=grad_bucket_numel,
             bits_per_element=model_repr.bits_per_parameter,
         )
-        n_buckets = ceil_divide(mp_params_size.numel(), grad_bucket_numel)
-        print(f"reduce_scatter/all_gather n_buckets = {n_buckets}")
+        n_buckets = mp_params_size.numel() / grad_bucket_numel
+        print(f"reduce_scatter/all_gather n_buckets = ceil({n_buckets})")
         print()
         # full BW should be divided along all MP ranks within a single node, since
         # they are each participating in their own DP collectives. We make the
