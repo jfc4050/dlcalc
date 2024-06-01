@@ -95,7 +95,7 @@ class MachineSpec:
                     unidirectional_bw_bytes_per_sec=int(450e9),
                     latency_sec=3e-6,
                 ),
-                # EFA v2
+                # EFA v2 - 32 x 100 Gbps
                 inter_node_connect=LinkSpec(
                     unidirectional_bw_bytes_per_sec=int(400e9),
                     latency_sec=EFA_LATENCY_S,

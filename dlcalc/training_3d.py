@@ -223,7 +223,7 @@ def main() -> None:
         # microbatch there's only one active pipeline stage at a time
         single_microbatch_bwd_time = single_microbatch_bwd_flops / devices_in_mp_group_flops
         print(
-            f"single MP rank, single microbatch bwd compute time {single_microbatch_bwd_time:.2f} s "
+            f"single MP rank, single microbatch bwd compute time {single_microbatch_bwd_time * 1000:.3f} ms "
             f"(if 100% FLOPs utilization)"
         )
         print()
@@ -269,9 +269,9 @@ def main() -> None:
         )
         print(
             f"reduce_scatter(1_grad_bucket):\n"
-            f"\tlatency term = {grad_bucket_reduce_scatter_lat_term_s:.3f} s\n"
-            f"\tbw term = {grad_bucket_reduce_scatter_bw_term_s:.3f} s (if 100% BW utilization)\n"
-            f"\tTOTAL = {grad_bucket_reduce_scatter_time_s:.3f} s\n"
+            f"\tlatency term = {grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms\n"
+            f"\tbw term = {grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms (if 100% BW utilization)\n"
+            f"\tTOTAL = {grad_bucket_reduce_scatter_time_s * 1000:.3f} ms\n"
         )
         param_bucket_all_gather_lat_term_s = get_dp_all_gather_latency_term_s(
             model_repr.parallelism_cfg.dp,
@@ -297,11 +297,11 @@ def main() -> None:
         )
 
         print(
-            f"reduce_scatter(all_grad_buckets) time = {grad_bucket_reduce_scatter_time_s * n_buckets:.3f} s "
+            f"reduce_scatter(all_grad_buckets) time = {grad_bucket_reduce_scatter_time_s * n_buckets * 1000:.3f} ms "
             f"(if 100% BW utilization)"
         )
         print(
-            f"all_gather(all_param_buckets) time = {param_bucket_all_gather_time_s * n_buckets:.3f} s "
+            f"all_gather(all_param_buckets) time = {param_bucket_all_gather_time_s * n_buckets * 1000:.3f} ms "
             f"(if 100% BW utilization)"
         )
 
