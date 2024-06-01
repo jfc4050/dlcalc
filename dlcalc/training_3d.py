@@ -183,6 +183,12 @@ def main() -> None:
         f"TP reduce-scatter: {activation_size}: {get_tp_reduce_scatter_comm_time_s(size=activation_size, n_participants=model_repr.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
     )
 
+    print_section_header("PP COMMUNICATION")
+    activation_send_time_s = (
+        activation_size.bytes() / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
+    )
+    print(f"PP send/recv: {activation_size}: {activation_send_time_s * 1000:.3f} ms")
+
     print_section_header("PIPELINE BUBBLE")
 
     vpp = cfg["parallelism"]["vpp"]
