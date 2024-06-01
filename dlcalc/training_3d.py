@@ -291,9 +291,9 @@ def main() -> None:
         )
         print(
             f"all_gather(1_param_bucket):\n"
-            f"\tlatency term = {param_bucket_all_gather_lat_term_s:.3f} s\n"
-            f"\tbw term = {param_bucket_all_gather_bw_term_s:.3f} s (if 100% BW utilization)\n"
-            f"\tTOTAL = {param_bucket_all_gather_time_s:.3f} s\n"
+            f"\tlatency term = {param_bucket_all_gather_lat_term_s * 1000:.3f} ms\n"
+            f"\tbw term = {param_bucket_all_gather_bw_term_s * 1000:.3f} ms (if 100% BW utilization)\n"
+            f"\tTOTAL = {param_bucket_all_gather_time_s * 1000:.3f} ms\n"
         )
 
         print(
