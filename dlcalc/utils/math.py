@@ -5,7 +5,14 @@ from typing import Tuple
 def safe_divide(numerator: int, denominator: int) -> int:
     """return numerator / denominator, or throw an exception if its not divisible."""
     if numerator % denominator != 0:
-        raise ValueError(f"{numerator} not divisible by {denominator}")
+        valid_denominators = []
+        for candidate_denominator in range(1, numerator):
+            if numerator % candidate_denominator == 0:
+                valid_denominators.append(candidate_denominator)
+        raise ValueError(
+            f"{numerator} not divisible by {denominator}. "
+            f"valid denominators: {valid_denominators}"
+        )
 
     return numerator // denominator
 
