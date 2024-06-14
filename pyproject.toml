@@ -18,6 +18,7 @@ dev = [
 [project.scripts]
 3dtrn = "dlcalc.training_3d:main"
 ckpt-summarize = "dlcalc.summarize_checkpoint:main"
+sps2tpd = "dlcalc.samples_per_sec_to_tokens_per_day:main"
 
 [tool.setuptools]
 packages = ["dlcalc"]
