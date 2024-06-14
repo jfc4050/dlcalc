@@ -234,6 +234,7 @@ def main() -> None:
         # grads are reduced in full-precision
         # params are all-gathered in half-precision
         mp_params_size = model_repr.states.params_shard.size(partitioned=True)
+        print(f"params per MP degree: {mp_params_size}")
         # TODO. precisions here assume we are doing AMP
         grad_bucket_numel = model_repr.grad_bucket_numel()
         grad_bucket_size = Size(
