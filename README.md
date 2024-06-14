@@ -36,6 +36,12 @@ we've include a sample config you can try tweaking
 3dtrn examples/llama3_70b.yaml
 ```
 
+### Samples/Sec -> Tokens/Day Converter
+pretty self explanatory, for more details run
+```bash
+sps2tpd -h
+```
+
 ### Checkpoint Summarizer
 gives a human-readable summarization of keys, values, and tensor shapes in
 a given training checkpoint.
