@@ -36,7 +36,8 @@ For more details run:
 3dtrn -h
 ```
 
-We've include a sample config you can use to see what the output looks like:
+We've include a [sample config](examples/llama3_70b.yaml) you can use to see what the
+output looks like:
 ```bash
 3dtrn examples/llama3_70b.yaml
 ```
@@ -47,6 +48,13 @@ We recommend pairing this with a profiler of your choice
 are two good ones), and checking that what you see in the profiler is in the same
 ballpark as the theoretical values estimated by the calculator. If they are way
 off, you now know where to spend your investigation/debugging time.
+
+**NOTE:** If you look at the [sample config](examples/llama3_70b.yaml), you'll see that
+it takes an instance type which is used to derive various hardware
+specifications like intra/inter node bandwidth, theoretical FLOPS per device,
+number of accelerators per node, etc. You can check [hardware.py](dlcalc/utils/hardware.py)
+to see what instance types are supported, you'll have to add it there if the 
+instance type you're interested in isn't represented there.
 
 ### Samples/Sec -> Tokens/Day Converter
 Pretty self explanatory, for more details run:
