@@ -45,7 +45,8 @@ We recommend pairing this with a profiler of your choice
 ([NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and
 [PyTorch Profiler Traces](https://pytorch.org/docs/stable/profiler.html#torch.profiler._KinetoProfile.export_chrome_trace)
 are two good ones), and checking that what you see in the profiler is in the same
-ballpark as the theoretical values estimated by the calculator.
+ballpark as the theoretical values estimated by the calculator. If they are way
+off, you now know where to spend your investigation/debugging time.
 
 ### Samples/Sec -> Tokens/Day Converter
 Pretty self explanatory, for more details run:
