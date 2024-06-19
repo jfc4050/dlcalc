@@ -42,6 +42,12 @@ pretty self explanatory, for more details run
 sps2tpd -h
 ```
 
+### Samples/Sec -> MFU Converter
+pretty self explanatory, for more details run
+```bash
+sps2mfu -h
+```
+
 ### Checkpoint Summarizer
 gives a human-readable summarization of keys, values, and tensor shapes in
 a given training checkpoint.
