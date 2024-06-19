@@ -31,6 +31,9 @@ transformer model training:
 * compute intensity
 * etc..
 
+This calculator is focused primarily on pretraining, so you won't find calculations
+for things like LoRA or RLHF/DPO/etc.
+
 For more details run:
 ```bash
 3dtrn -h
