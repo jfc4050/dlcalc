@@ -57,7 +57,7 @@ it takes an instance type which is used to derive various hardware
 specifications like intra/inter node bandwidth, theoretical FLOPS per device,
 number of accelerators per node, etc. You can check [hardware.py](dlcalc/utils/hardware.py)
 to see what instance types are supported, you'll have to add it there if the 
-instance type you're interested in isn't represented there.
+instance type you're interested in isn't represented.
 
 ### Samples/Sec -> Tokens/Day Converter
 Pretty self explanatory, for more details run:
