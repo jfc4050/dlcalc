@@ -20,7 +20,7 @@ from dlcalc.utils.compute import compute_gemm_flops
 from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.data import Size, TensorRepr
 from dlcalc.utils.hardware import MachineSpec
-from dlcalc.utils.math import ceil_divide, product, safe_divide
+from dlcalc.utils.math import product, safe_divide
 from dlcalc.utils.model_3d import ParallelConfig, ThreeDParallelModel
 from dlcalc.utils.printing import print_section_header
 

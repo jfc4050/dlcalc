@@ -38,8 +38,10 @@ line-length = 100
 
 [tool.ruff.lint]
 select = [
+    # pyflakes
+    "F",
     # isort
-    "I001"
+    "I"
 ]
 
 [build-system]
