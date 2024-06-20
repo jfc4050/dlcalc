@@ -240,6 +240,24 @@ class ThreeDParallelModel:
             ),
         )
 
+    def get_single_microbatch_fwd_flops(self) -> float:
+        return (
+            2  # FLOPs/MAC
+            * 1  # factor for forward only (1 GEMMs per op)
+            * self.microbatch_sz
+            * self.sequence_len
+            * self.get_total_n_params(partitioned=False)
+        )
+
+    def get_single_microbatch_bwd_flops(self) -> float:
+        return (
+            2  # FLOPs/MAC
+            * 2  # factor for backward only (2 GEMMs per op)
+            * self.microbatch_sz
+            * self.sequence_len
+            * self.get_total_n_params(partitioned=False)
+        )
+
     def get_total_n_params(self, partitioned: bool) -> int:
         embedding_or_lm_head_n_params = self.__get_embedding_or_lm_head_size(
             partitioned=partitioned

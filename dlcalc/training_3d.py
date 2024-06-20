@@ -207,24 +207,22 @@ def main() -> None:
         ###############################################################################
         # compute the backward time for a single microbatch.
         ###############################################################################
-        # NOTE: this is fully sequential, there's no other microbatches to overlap with
-        single_microbatch_bwd_flops = (
-            2  # FLOPs/MAC
-            * 2  # factor for backward only (2 GEMMs per op)
-            * model_repr.microbatch_sz
-            * model_repr.sequence_len
-            * model_repr.get_total_n_params(partitioned=False)
-        )
-        devices_in_mp_group_flops = (
-            model_repr.parallelism_cfg.mp_degree() * machine_spec.device_spec.peak_flops
+        devices_in_pp_stage_flops = (
+            model_repr.parallelism_cfg.tp * machine_spec.device_spec.peak_flops
         )
 
         # divide by single pipeline stage TFLOPs, since its just for single
         # microbatch there's only one active pipeline stage at a time
-        single_microbatch_bwd_time = single_microbatch_bwd_flops / devices_in_mp_group_flops
+        single_microbatch_fwd_time = (
+            model_repr.get_single_microbatch_fwd_flops() / devices_in_pp_stage_flops
+        )
+        single_microbatch_bwd_time = (
+            model_repr.get_single_microbatch_bwd_flops() / devices_in_pp_stage_flops
+        )
         print(
-            f"single MP rank, single microbatch bwd compute time {single_microbatch_bwd_time * 1000:.3f} ms "
-            f"(if 100% FLOPs utilization)"
+            f"single PP rank: (if 100% FLOPs utilization):\n"
+            f"* single microbatch fwd compute time {single_microbatch_fwd_time * 1000:.3f} ms\n"
+            f"* single microbatch bwd compute time {single_microbatch_bwd_time * 1000:.3f} ms"
         )
         print()
 
@@ -305,6 +303,10 @@ def main() -> None:
             f"all_gather(all_param_buckets) time = {param_bucket_all_gather_time_s * n_buckets * 1000:.3f} ms "
             f"(if 100% BW utilization)"
         )
+
+    ##################################################################################
+    # Iteration Time
+    ##################################################################################
 
 
 if __name__ == "__main__":
