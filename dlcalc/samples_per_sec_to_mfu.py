@@ -28,36 +28,47 @@ def main() -> None:
     )
     parser.add_argument(
         "-n",
-        "--n-nodes",
+        "--n-accelerators",
         type=int,
         required=True,
-        help="number of nodes used for training",
+        help="number of accelerators used for training",
     )
     parser.add_argument(
-        "--tflops-per-node",
+        "--tflops-per-accelerator",
         type=float,
         required=True,
-        help="theoretical tflops per node",
+        help="theoretical tflops per accelerator",
     )
     args = parser.parse_args()
 
     samples_per_sec = args.samples_per_sec
     tokens_per_sample = args.seqlen
     model_size = args.model_size_in_b * 1e9
-    n_nodes = args.n_nodes
-    flops_per_node = args.tflops_per_node * 1e12
+    n_accelerators = args.n_accelerators
+    flops_per_accelerator = args.tflops_per_accelerator * 1e12
 
-    achieved_flops = samples_per_sec * tokens_per_sample * 6 * model_size
-    theoretical_flops = flops_per_node * n_nodes
+    tokens_per_sec = tokens_per_sample * samples_per_sec
+    flops_per_token = 6 * model_size
 
+    # MFU
+    achieved_flops = flops_per_token * tokens_per_sec
+    theoretical_flops = flops_per_accelerator * n_accelerators
     mfu = achieved_flops / theoretical_flops
 
+    # tokens/day
+    tokens_per_day = tokens_per_sec * 60 * 60 * 24
+
     print(
-        f"{samples_per_sec} samples/sec "
-        f"with sequence length {tokens_per_sample} "
-        f"and model size {model_size * 1e-9:.2f}B "
-        f"translates to {mfu * 100:.2f}% MFU"
+        f"inputs:\n"
+        f"* model size (in billions of parameters): {model_size * 1e-9:.2f}B\n"
+        f"* sequence length: {tokens_per_sample}\n"
+        f"* samples/second: {samples_per_sec:.2f}\n"
+        f"* n_accelerators: {n_accelerators}\n"
+        f"* TFLOPs/accelerator: {flops_per_accelerator * 1e-12:.2f}\n"
     )
+
+    print(f"{tokens_per_day * 1e-9:.2f}B tokens/day")
+    print(f"{mfu * 100:.2f}% MFU")
 
 
 if __name__ == "__main__":
