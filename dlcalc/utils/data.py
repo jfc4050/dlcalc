@@ -72,7 +72,7 @@ class TensorRepr:
             )
 
         self._shape = unpartitioned_shape
-        self._numel = product(unpartitioned_shape)
+        self._numel = product(*unpartitioned_shape)
         self._partition_dim = partition_dim
         self._partition_degree = partition_degree
         self._bits_per_elt = bits_per_elt

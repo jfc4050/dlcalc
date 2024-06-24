@@ -1,5 +1,4 @@
 import math
-from typing import Tuple
 
 
 def safe_divide(numerator: int, denominator: int) -> int:
@@ -22,7 +21,7 @@ def ceil_divide(numerator: int, denominator: int) -> int:
     return int(math.ceil(numerator / denominator))
 
 
-def product(multiplicands: Tuple[int, ...]) -> int:
+def product(*multiplicands: int) -> int:
     """return the product of a sequence of multiplicands."""
     assert len(multiplicands) > 0
     product = 1

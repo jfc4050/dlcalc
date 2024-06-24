@@ -152,10 +152,10 @@ def main() -> None:
         gemm_input_dim, gemm_output_dim = weight_repr.shape(partitioned=True)
         weight_bytes = bytes_per_element * weight_repr.numel(partitioned=True)
         input_bytes = bytes_per_element * product(
-            (model_repr.sequence_len, model_repr.microbatch_sz, gemm_input_dim)
+            model_repr.sequence_len, model_repr.microbatch_sz, gemm_input_dim
         )
         output_bytes = bytes_per_element * product(
-            (model_repr.sequence_len, model_repr.microbatch_sz, gemm_output_dim)
+            model_repr.sequence_len, model_repr.microbatch_sz, gemm_output_dim
         )
         print(
             f"\tLOAD INPUT: {input_bytes * 1e-9:.2f} GB -> "

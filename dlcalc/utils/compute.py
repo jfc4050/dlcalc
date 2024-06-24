@@ -11,7 +11,7 @@ from .math import ceil_divide, product
 
 def compute_gemm_flops(n_tokens: int, weight_shape: Tuple[int, ...]) -> float:
     """compute the number of FLOPs in a linear layer. Given by 2MNK."""
-    return 2 * n_tokens * product(weight_shape)
+    return 2 * n_tokens * product(*weight_shape)
 
 
 def compute_gemm_n_tiles(
@@ -30,9 +30,7 @@ def compute_gemm_n_tiles(
     tile_k = gemm_k
 
     return product(
-        (
-            ceil_divide(gemm_m, tile_m),
-            ceil_divide(gemm_n, tile_n),
-            ceil_divide(gemm_k, tile_k),
-        )
+        ceil_divide(gemm_m, tile_m),
+        ceil_divide(gemm_n, tile_n),
+        ceil_divide(gemm_k, tile_k),
     )
