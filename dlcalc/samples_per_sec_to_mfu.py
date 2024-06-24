@@ -1,4 +1,4 @@
-"""simple utility to convert samples/second to tokens/day"""
+"""simple utility to convert samples/second to MFU."""
 
 from argparse import ArgumentParser
 
@@ -6,14 +6,14 @@ from argparse import ArgumentParser
 def main() -> None:
     parser = ArgumentParser(__doc__)
     parser.add_argument(
-        "-t",
+        "-s",
         "--samples-per-sec",
         type=float,
         required=True,
         help="training throughput in samples/sec",
     )
     parser.add_argument(
-        "-s",
+        "-l",
         "--seqlen",
         type=int,
         required=True,
@@ -34,6 +34,7 @@ def main() -> None:
         help="number of accelerators used for training",
     )
     parser.add_argument(
+        "-t",
         "--tflops-per-accelerator",
         type=float,
         required=True,
@@ -60,11 +61,11 @@ def main() -> None:
 
     print(
         f"inputs:\n"
-        f"* model size (in billions of parameters): {model_size * 1e-9:.2f}B\n"
+        f"* model size: {model_size * 1e-9:.2f}B parameters\n"
         f"* sequence length: {tokens_per_sample}\n"
-        f"* samples/second: {samples_per_sec:.2f}\n"
+        f"* training throughput: {samples_per_sec:.2f} samples/second\n"
         f"* n_accelerators: {n_accelerators}\n"
-        f"* TFLOPs/accelerator: {flops_per_accelerator * 1e-12:.2f}\n"
+        f"* FLOPs/accelerator: {flops_per_accelerator * 1e-12:.2f} TFLOPs\n"
     )
 
     print(f"{tokens_per_day * 1e-9:.2f}B tokens/day")
