@@ -59,6 +59,13 @@ number of accelerators per node, etc. You can check [hardware.py](dlcalc/utils/h
 to see what instance types are supported, you'll have to add it there if the 
 instance type you're interested in isn't represented.
 
+### Topology Grapher
+Given a kubernetes pod name prefix for some compute cluster, retrieve AWS network
+topology info and plot. For more details run:
+```bash
+topogrph -h
+```
+
 ### Samples/Sec -> Tokens/Day Converter
 Pretty self explanatory, for more details run:
 ```bash

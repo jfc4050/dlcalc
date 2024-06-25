@@ -1,5 +1,6 @@
 """
-TODO.
+given a kubernetes pod name prefix for some compute cluster, retrieve AWS network
+topology info and plot.
 """
 
 import json
@@ -23,11 +24,12 @@ def _dict_to_label(dict: dict) -> str:
 
 def main() -> None:
     parser = ArgumentParser(__doc__)
-    parser.add_argument("-s", "--search-prefix")
-    parser.add_argument("-r", "--region")
+    parser.add_argument(
+        "search_prefix",
+        help="kubernetes pod name prefix to use when filtering pods returned by `kubectl get pods`",
+    )
     args = parser.parse_args()
 
-    region = args.region
     job_search_prefix = args.search_prefix
 
     ######################################################################################
@@ -45,10 +47,11 @@ def main() -> None:
             continue
 
         node_name_to_pod_name[node_name] = pod_name
+    print(f"found {len(node_name_to_pod_name)} matching pods")
 
+    node_regions = set()
     node_id_to_pod_name = {}
     for node_info in client.list_node().items:
-        # print(node_info)
         node_name = node_info.metadata.name
         node_id = json.loads(node_info.metadata.annotations["csi.volume.kubernetes.io/nodeid"])[
             "fsx.csi.aws.com"
@@ -56,39 +59,47 @@ def main() -> None:
         if node_name in node_name_to_pod_name:
             node_id_to_pod_name[node_id] = node_name_to_pod_name[node_name]
 
-    if len(node_name_to_pod_name) != len(node_id_to_pod_name):
-        raise RuntimeError  # TODO. fill out error message
+            node_region = node_info.metadata.labels["topology.kubernetes.io/region"]
+            node_regions.add(node_region)
 
-    # worker_id = int(re.search(pattern, pod_name).group(1))
+    (cluster_region,) = node_regions  # only handling single region clusters
+
+    if len(node_name_to_pod_name) != len(node_id_to_pod_name):
+        raise RuntimeError(
+            f"found {len(node_name_to_pod_name)} pods but "
+            f"was only able to match {len(node_id_to_pod_name)} to instance IDs"
+        )
 
     instance_ids = list(node_id_to_pod_name.keys())
-    print(instance_ids)
 
     ######################################################################################
     # STEP 2: Get topology of the instances acquired earlier.
     ######################################################################################
-    ec2_client = boto3.client("ec2", region_name=region)
+    print(f"getting topology info for instance IDs {instance_ids}")
+    ec2_client = boto3.client("ec2", region_name=cluster_region)
 
     paginator = ec2_client.get_paginator("describe_instance_topology")
     topo_info = []
     for page in paginator.paginate(InstanceIds=instance_ids):
         topo_info.extend(page["Instances"])
 
-    print(topo_info)
-
     net = Network(directed=True)
 
     for instance_info in topo_info:
         instance_id = instance_info["InstanceId"]
-        # instance_type = instance_info["InstanceType"]
-        # order: farthest from instance -> closest to instance
+        instance_type = instance_info["InstanceType"]
         network_nodes = instance_info["NetworkNodes"]
+
+        pod_name = node_id_to_pod_name[instance_id]
+        worker_id = int(re.search(pattern, pod_name).group(1))
 
         net.add_node(
             instance_id,
             title=_dict_to_label(
                 {
-                    "InstanceType": instance_info["InstanceType"],
+                    "PodName": pod_name,
+                    "WorkerId": worker_id,
+                    "InstanceType": instance_type,
                     "AvailabilityZone": instance_info["AvailabilityZone"],
                 }
             ),
@@ -99,11 +110,10 @@ def main() -> None:
         for network_node in network_nodes:
             net.add_node(network_node, color="red", physics=False)
 
+        # order of network nodes: farthest from instance -> closest to instance
         chain = [instance_id, *reversed(network_nodes)]
-
         for edge_src_idx in range(len(chain) - 1):
             edge_dst_idx = edge_src_idx + 1
-
             net.add_edge(chain[edge_src_idx], chain[edge_dst_idx], physics=False)
 
     net.show_buttons()
