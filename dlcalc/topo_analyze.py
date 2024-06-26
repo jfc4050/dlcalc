@@ -6,13 +6,42 @@ topology info and plot.
 import json
 import re
 from argparse import ArgumentParser
+from typing import Set
 
 import boto3
 import kubernetes
+from botocore.client import BaseClient
 from kubernetes.client import CoreV1Api
 from pyvis.network import Network
 
-pattern = re.compile(r"worker-(\d+)")
+pod_id_pattern = re.compile(r"worker-(\d+)")
+
+
+def _iter_instance_info(
+    ec2_client: BaseClient,
+    accepted_instance_ids: Set[str],
+    accepted_node_instance_types: Set[str],
+    accepted_node_availability_zones: Set[str],
+):
+    paginator = ec2_client.get_paginator("describe_instance_topology")
+
+    # we have to filter in this roundabout way instead of giving a set of instance IDs
+    # because API doesn't accept >100 instance IDs
+    instance_filters = [
+        {
+            "Name": "instance-type",
+            "Values": list(accepted_node_instance_types),
+        },
+        {
+            "Name": "availability-zone",
+            "Values": list(accepted_node_availability_zones),
+        },
+    ]
+
+    for page in paginator.paginate(Filters=instance_filters):
+        for instance_info in page["Instances"]:
+            if instance_info["InstanceId"] in accepted_instance_ids:
+                yield instance_info
 
 
 def _dict_to_label(dict: dict) -> str:
@@ -49,7 +78,10 @@ def main() -> None:
         node_name_to_pod_name[node_name] = pod_name
     print(f"found {len(node_name_to_pod_name)} matching pods")
 
-    node_regions = set()
+    cluster_regions = set()
+    cluster_azs = set()
+    cluster_instance_types = set()
+
     node_id_to_pod_name = {}
     for node_info in client.list_node().items:
         node_name = node_info.metadata.name
@@ -60,9 +92,17 @@ def main() -> None:
             node_id_to_pod_name[node_id] = node_name_to_pod_name[node_name]
 
             node_region = node_info.metadata.labels["topology.kubernetes.io/region"]
-            node_regions.add(node_region)
+            cluster_regions.add(node_region)
 
-    (cluster_region,) = node_regions  # only handling single region clusters
+            node_zone = node_info.metadata.labels["topology.kubernetes.io/zone"]
+            cluster_azs.add(node_zone)
+
+            node_instance_type = node_info.metadata.labels["node.kubernetes.io/instance-type"]
+            cluster_instance_types.add(node_instance_type)
+
+    (cluster_region,) = cluster_regions  # only handling single region clusters
+    if len(cluster_instance_types) != 1:
+        print(f"WARNING: found {len(cluster_instance_types)}, generally there should only be 1.")
 
     if len(node_name_to_pod_name) != len(node_id_to_pod_name):
         raise RuntimeError(
@@ -70,7 +110,7 @@ def main() -> None:
             f"was only able to match {len(node_id_to_pod_name)} to instance IDs"
         )
 
-    instance_ids = list(node_id_to_pod_name.keys())
+    instance_ids = set(node_id_to_pod_name.keys())
 
     ######################################################################################
     # STEP 2: Get topology of the instances acquired earlier.
@@ -78,20 +118,19 @@ def main() -> None:
     print(f"getting topology info for instance IDs {instance_ids}")
     ec2_client = boto3.client("ec2", region_name=cluster_region)
 
-    paginator = ec2_client.get_paginator("describe_instance_topology")
-    topo_info = []
-    for page in paginator.paginate(InstanceIds=instance_ids):
-        topo_info.extend(page["Instances"])
-
     net = Network(directed=True)
-
-    for instance_info in topo_info:
+    for instance_info in _iter_instance_info(
+        ec2_client=ec2_client,
+        accepted_instance_ids=instance_ids,
+        accepted_node_instance_types=cluster_instance_types,
+        accepted_node_availability_zones=cluster_azs,
+    ):
         instance_id = instance_info["InstanceId"]
         instance_type = instance_info["InstanceType"]
         network_nodes = instance_info["NetworkNodes"]
 
         pod_name = node_id_to_pod_name[instance_id]
-        worker_id = int(re.search(pattern, pod_name).group(1))
+        worker_id = int(re.search(pod_id_pattern, pod_name).group(1))
 
         net.add_node(
             instance_id,
