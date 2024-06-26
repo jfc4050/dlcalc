@@ -7,7 +7,6 @@ import re
 from argparse import ArgumentParser
 
 import boto3
-import tqdm
 from pyvis.network import Network
 
 import dlcalc.utils.cluster.ec2
@@ -53,28 +52,21 @@ def main() -> None:
     ec2_client = boto3.client("ec2", region_name=cluster_region)
 
     net = Network(directed=True)
-    for instance_info in tqdm.tqdm(
-        dlcalc.utils.cluster.ec2.iter_instance_info(
-            ec2_client=ec2_client,
-            accepted_instance_ids=instance_ids,
-            accepted_node_instance_types=cluster_instance_types,
-            accepted_node_availability_zones=cluster_azs,
-        ),
-        desc="processing instance info",
+    for instance_info in dlcalc.utils.cluster.ec2.iter_instance_info(
+        ec2_client=ec2_client,
+        accepted_node_instance_types=cluster_instance_types,
+        accepted_node_availability_zones=cluster_azs,
+        accepted_instance_ids=instance_ids,
     ):
-        instance_id = instance_info["InstanceId"]
-        instance_type = instance_info["InstanceType"]
-        network_nodes = instance_info["NetworkNodes"]
-
-        job_member = instance_id_to_job_member[instance_id]
+        job_member = instance_id_to_job_member[instance_info.instance_id]
 
         net.add_node(
-            instance_id,
+            instance_info.instance_id,
             title=_dict_to_label(
                 {
                     "PodName": job_member.pod_name,
                     "WorkerId": job_member.worker_id,
-                    "InstanceType": instance_type,
+                    "InstanceType": instance_info.instance_type,
                     "AvailabilityZone": instance_info["AvailabilityZone"],
                 }
             ),
@@ -82,11 +74,11 @@ def main() -> None:
             physics=False,
         )
 
-        for network_node in network_nodes:
+        for network_node in instance_info.network_nodes:
             net.add_node(network_node, color="red", physics=False)
 
         # order of network nodes: farthest from instance -> closest to instance
-        chain = [instance_id, *reversed(network_nodes)]
+        chain = [*instance_info.network_nodes, instance_info.instance_id]
         for edge_src_idx in range(len(chain) - 1):
             edge_dst_idx = edge_src_idx + 1
             net.add_edge(chain[edge_src_idx], chain[edge_dst_idx], physics=False)
