@@ -10,6 +10,7 @@ from typing import Set
 
 import boto3
 import kubernetes
+import tqdm
 from botocore.client import BaseClient
 from kubernetes.client import CoreV1Api
 from pyvis.network import Network
@@ -23,6 +24,7 @@ def _iter_instance_info(
     accepted_node_instance_types: Set[str],
     accepted_node_availability_zones: Set[str],
 ):
+    # ref: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-instance-topology.html
     paginator = ec2_client.get_paginator("describe_instance_topology")
 
     # we have to filter in this roundabout way instead of giving a set of instance IDs
@@ -38,7 +40,7 @@ def _iter_instance_info(
         },
     ]
 
-    for page in paginator.paginate(Filters=instance_filters):
+    for page in paginator.paginate(Filters=instance_filters, PaginationConfig={"PageSize": 100}):
         for instance_info in page["Instances"]:
             if instance_info["InstanceId"] in accepted_instance_ids:
                 yield instance_info
@@ -119,11 +121,14 @@ def main() -> None:
     ec2_client = boto3.client("ec2", region_name=cluster_region)
 
     net = Network(directed=True)
-    for instance_info in _iter_instance_info(
-        ec2_client=ec2_client,
-        accepted_instance_ids=instance_ids,
-        accepted_node_instance_types=cluster_instance_types,
-        accepted_node_availability_zones=cluster_azs,
+    for instance_info in tqdm.tqdm(
+        _iter_instance_info(
+            ec2_client=ec2_client,
+            accepted_instance_ids=instance_ids,
+            accepted_node_instance_types=cluster_instance_types,
+            accepted_node_availability_zones=cluster_azs,
+        ),
+        desc="processing instance info",
     ):
         instance_id = instance_info["InstanceId"]
         instance_type = instance_info["InstanceType"]
