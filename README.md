@@ -21,7 +21,8 @@ After this you should have access to the command line tools described below. Som
 people may need to add `--user` to their pip install command for them to properly
 go under `$PATH`.
 
-## Tools
+# Tools
+## Performance Modeling
 ### 3D Training Calculator
 Calculator for estimating various performance characteristics of 3D parallel
 transformer model training:
@@ -59,6 +60,7 @@ number of accelerators per node, etc. You can check [hardware.py](dlcalc/utils/h
 to see what instance types are supported, you'll have to add it there if the 
 instance type you're interested in isn't represented.
 
+## Topology
 ### Topology Visualizer
 ![example](images/topoviz_example.png)
 
@@ -75,6 +77,7 @@ communication. For more details run:
 topoassign -h
 ```
 
+## KPIs
 ### Samples/Sec -> Tokens/Day Converter
 Pretty self explanatory, for more details run:
 ```bash
@@ -89,6 +92,7 @@ explanatory, for more details run:
 sps2mfu -h
 ```
 
+## Misc.
 ### Checkpoint Summarizer
 Gives a human-readable summarization of keys, values, and tensor shapes in
 a given (PyTorch) model checkpoint. For more details run:
@@ -96,7 +100,7 @@ a given (PyTorch) model checkpoint. For more details run:
 ckpt-summarize -h
 ```
 
-## Development
+# Development
 install development dependencies
 ```bash
 pip install -e .[dev]
