@@ -68,6 +68,13 @@ topology info and plot. For more details run:
 topoviz -h
 ```
 
+### Topology-Aware Scheduler
+Topology-aware instance selection and rank assignment for maximally efficient DP
+communication. For more details run:
+```bash
+topoassign -h
+```
+
 ### Samples/Sec -> Tokens/Day Converter
 Pretty self explanatory, for more details run:
 ```bash
