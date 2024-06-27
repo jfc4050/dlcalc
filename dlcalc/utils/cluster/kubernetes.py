@@ -33,7 +33,6 @@ def get_kubernetes_cluster_members(job_search_prefix: str) -> List[KubernetesJob
             continue
 
         node_name_to_pod_name[node_name] = pod_name
-    print(f"found {len(node_name_to_pod_name)} matching pods")
 
     cluster_regions = set()
     cluster_azs = set()

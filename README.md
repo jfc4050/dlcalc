@@ -70,6 +70,13 @@ topology info and plot. For more details run:
 topoviz -h
 ```
 
+### Topology Evaluator
+Evaluates how optimal a given training job's physical topology is (in terms of
+network hops in each DP ring). For more details run:
+```bash
+topoeval -h
+```
+
 ### Topology-Aware Scheduler
 Topology-aware instance selection and rank assignment for maximally efficient DP
 communication. For more details run:

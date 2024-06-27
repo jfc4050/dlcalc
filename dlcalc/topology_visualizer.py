@@ -67,7 +67,7 @@ def main() -> None:
                     "PodName": job_member.pod_name,
                     "WorkerId": job_member.worker_id,
                     "InstanceType": instance_info.instance_type,
-                    "AvailabilityZone": instance_info["AvailabilityZone"],
+                    "AvailabilityZone": instance_info.instance_az,
                 }
             ),
             color="blue",
