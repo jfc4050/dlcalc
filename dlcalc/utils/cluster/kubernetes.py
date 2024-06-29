@@ -1,7 +1,7 @@
 import dataclasses
 import json
 import re
-from typing import List
+from typing import List, Set
 
 import kubernetes
 from kubernetes.client import CoreV1Api
@@ -80,3 +80,23 @@ def get_kubernetes_cluster_members(job_search_prefix: str) -> List[KubernetesJob
         )
 
     return cluster_members
+
+
+def get_free_instances() -> Set[str]:
+    kubernetes.config.load_kube_config()
+    client = CoreV1Api()
+
+    occupied_nodes = set()
+    for pod_info in client.list_namespaced_pod(namespace="default", watch=False).items:
+        occupied_nodes.add(pod_info.spec.node_name)
+
+    free_instance_ids = set()
+    for node_info in client.list_node().items:
+        node_name = node_info.metadata.name
+        if node_name not in occupied_nodes:
+            node_instance_id = json.loads(
+                node_info.metadata.annotations["csi.volume.kubernetes.io/nodeid"]
+            )["fsx.csi.aws.com"]
+            free_instance_ids.add(node_instance_id)
+
+    return free_instance_ids

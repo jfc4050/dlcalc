@@ -9,6 +9,7 @@ from typing import List
 import boto3
 
 import dlcalc.utils.cluster.ec2
+import dlcalc.utils.cluster.kubernetes
 import dlcalc.utils.cluster.topology
 from dlcalc.utils.cluster.topology import TreeNode
 from dlcalc.utils.math import safe_divide
@@ -68,7 +69,10 @@ def main() -> None:
     dp_degree = args.dp_degree
     accelerators_per_node = args.accelerators_per_node
 
-    accepted_instance_ids = None  # TODO. maybe allow this to be read from a file
+    n_required_nodes = safe_divide(tp_degree * pp_degree * dp_degree, accelerators_per_node)
+
+    free_instance_ids = dlcalc.utils.cluster.kubernetes.get_free_instances()
+    print(f"found {len(free_instance_ids)} free instances")
     instance_type = args.instance_type
     region_name = args.region
     az = args.az
@@ -95,8 +99,14 @@ def main() -> None:
         accepted_node_availability_zones={
             az,
         },
-        accepted_instance_ids=accepted_instance_ids,
+        accepted_instance_ids=free_instance_ids,
     )
+    n_discovered_instances = len(node_id_to_node)
+
+    if n_discovered_instances < n_required_nodes:
+        raise RuntimeError(
+            f"training job requires {n_required_nodes} nodes but found {n_discovered_instances}"
+        )
     print(f"discovered {len(node_id_to_node)} instances")
 
     # find root node
@@ -113,12 +123,17 @@ def main() -> None:
     # placement.
     ordered_nodes = dlcalc.utils.cluster.topology.dfs_tree_leaves_only(root_node)
 
-    # TODO. need to debug further to see why not all nodes are reachable by the DFS
-    # if len(ordered_nodes) != len(instance_ids):
-    #     raise RuntimeError(
-    #         f"expected to traverse {len(instance_ids)} nodes "
-    #         f"but encountered {len(ordered_nodes)}"
-    #     )
+    if len(ordered_nodes) != n_discovered_instances:
+        # TODO. need to debug further to see why not all nodes are reachable by the DFS
+        # just warning for now.
+        print(
+            f"[WARN] expected to traverse {n_discovered_instances} instances "
+            f"but only encountered {len(ordered_nodes)}"
+        )
+        # raise RuntimeError(
+        #     f"expected to traverse {len(instance_ids)} nodes "
+        #     f"but encountered {len(ordered_nodes)}"
+        # )
 
     # iterate PP ranks in reverse order, because we want to prioritize giving
     # the best rings to the final PP ranks, where DP communication is

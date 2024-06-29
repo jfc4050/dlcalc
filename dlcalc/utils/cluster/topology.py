@@ -74,7 +74,11 @@ def build_instance_tree(
             nonroot_nodes.add(node)
         all_nodes.add(node)
 
-    assert len(root_nodes) == 1
+    if len(root_nodes) != 1:
+        raise RuntimeError(
+            f"expected to find 1 root node out of {len(all_nodes)} nodes "
+            f"but got {len(root_nodes)}"
+        )
     for node in nonroot_nodes:
         assert node.parent in all_nodes
 
@@ -93,7 +97,7 @@ def dfs_tree_leaves_only(root: TreeNode) -> List[TreeNode]:
     # we want this list of lists of leaves to be ordered from largest list -> smallest list
     # this means we use the largest subtrees first - meaning that we will prioritize
     # groups of instances that can communicate with maximum "locality"
-    list_of_list_of_leaves.sort(key=lambda l: len(l), reverse=True)
+    list_of_list_of_leaves.sort(key=len, reverse=True)
 
     # stick everything together. this gives a prioritized order of instances
     # that should be part of the same ring.

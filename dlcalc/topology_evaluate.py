@@ -91,9 +91,9 @@ def main() -> None:
             f"but found {len(cluster_members)}"
         )
     worker_id_to_instance_id = {m.worker_id: m.node_instance_id for m in cluster_members}
-    (cluster_region,) = set(m.node_region for m in cluster_members)
-    cluster_instance_types = list(set(m.node_instance_type for m in cluster_members))
-    cluster_azs = list(set(m.node_az for m in cluster_members))
+    (cluster_region,) = {m.node_region for m in cluster_members}
+    cluster_instance_types = {m.node_instance_type for m in cluster_members}
+    cluster_azs = {m.node_az for m in cluster_members}
 
     print(
         f"found {len(cluster_members)} matching pods, with "
@@ -124,7 +124,7 @@ def main() -> None:
         )
         print(
             f"DP ring for PP={pp_rank}: traversal distance: {traversal_dist} "
-            f"-> avg traversal distance: {traversal_dist / nodes_per_dp_ring}"
+            f"-> avg traversal distance: {traversal_dist / nodes_per_dp_ring:.2f}"
         )
         print()
 
