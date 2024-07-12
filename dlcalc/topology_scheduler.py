@@ -135,11 +135,8 @@ def main() -> None:
         #     f"but encountered {len(ordered_nodes)}"
         # )
 
-    # iterate PP ranks in reverse order, because we want to prioritize giving
-    # the best rings to the final PP ranks, where DP communication is
-    # hardest to overlap.
     ring_assignments: List[List[TreeNode]] = [None] * pp_degree
-    for pp_rank in reversed(range(pp_degree)):
+    for pp_rank in range(pp_degree):
         ring_assignments[pp_rank] = ordered_nodes[:nodes_per_dp_ring]
         ordered_nodes = ordered_nodes[nodes_per_dp_ring:]
 
