@@ -6,3 +6,4 @@ one-offs/
 lib/bindings
 lib/tom-select
 lib/vis-*
+build/
