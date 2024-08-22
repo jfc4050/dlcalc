@@ -1,6 +1,49 @@
 """simple utility to convert samples/second to MFU."""
 
+import re
 from argparse import ArgumentParser
+
+n_params_pattern = re.compile(r"([\d\.]+)([a-z])")
+n_accelerators_pattern = re.compile(r"(\d+)x(\d+)")
+
+
+def parse_n_params(n_params_str: str) -> int:
+    SUFFIX_TO_FACTOR = {
+        "m": 1e6,
+        "b": 1e9,
+        "t": 1e12,
+    }
+    n_params_str = n_params_str.lower()
+    match = re.match(n_params_pattern, n_params_str)
+
+    if not match:
+        raise ValueError(f"unable to parse n_params str {n_params_str}")
+
+    prefix = float(match.group(1))
+
+    suffix = match.group(2).lower()
+    if suffix not in SUFFIX_TO_FACTOR:
+        raise ValueError(
+            f"unable to parse n_params str '{n_params_str}' because of unrecognized suffix '{suffix}'"
+        )
+    factor = SUFFIX_TO_FACTOR[suffix]
+
+    return int(prefix * factor)
+
+
+def parse_n_accelerators(n_accelerators_str: str) -> int:
+    n_accelerators_str = n_accelerators_str.lower()
+    if n_accelerators_str.isnumeric():
+        return int(n_accelerators_str)
+    elif "x" in n_accelerators_str:
+        # axb format
+        match = re.match(n_accelerators_pattern, n_accelerators_str)
+        multiplicand_1 = int(match.group(1))
+        multiplicand_2 = int(match.group(2))
+
+        return multiplicand_1 * multiplicand_2
+    else:
+        raise ValueError(f"unable to parse n_accelerators input '{n_accelerators_str}'")
 
 
 def main() -> None:
@@ -21,17 +64,17 @@ def main() -> None:
     )
     parser.add_argument(
         "-m",
-        "--model-size-in-b",
-        type=float,
+        "--model-size",
+        type=str,
         required=True,
-        help="model size (in billions of parameters)",
+        help="model size (for example 100m, 100b, or 100t)",
     )
     parser.add_argument(
         "-n",
         "--n-accelerators",
-        type=int,
+        type=str,
         required=True,
-        help="number of accelerators used for training",
+        help="number of accelerators used for training. accepts formats like '16' or '2x8'",
     )
     parser.add_argument(
         "-t",
@@ -44,8 +87,8 @@ def main() -> None:
 
     samples_per_sec = args.samples_per_sec
     tokens_per_sample = args.seqlen
-    model_size = args.model_size_in_b * 1e9
-    n_accelerators = args.n_accelerators
+    model_size = parse_n_params(args.model_size)
+    n_accelerators = parse_n_accelerators(args.n_accelerators)
     flops_per_accelerator = args.tflops_per_accelerator * 1e12
 
     tokens_per_sec = tokens_per_sample * samples_per_sec
