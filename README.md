@@ -62,8 +62,6 @@ instance type you're interested in isn't represented.
 
 ## Topology
 ### Topology Visualizer
-![example](images/topoviz_example.png)
-
 Given a kubernetes pod name prefix for some compute cluster, retrieve AWS network
 topology info and plot. For more details run:
 ```bash
