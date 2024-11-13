@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Dict, Tuple
 
 from .math import ceil_divide, product, safe_divide
 
@@ -51,53 +51,46 @@ class TensorRepr:
     def __init__(
         self,
         unpartitioned_shape: Tuple[int, ...],
-        partition_dim: Optional[int],
-        partition_degree: int,
+        partition_spec: Dict[int, int],  # axis -> degree
         bits_per_elt: int,
         enforce_evenly_partitionable: bool = True,
     ) -> None:
-        if partition_degree > 1 and partition_dim is None:
-            raise RuntimeError(
-                f"with partition degree {partition_degree}, must specify partition_dim"
-            )
+        if enforce_evenly_partitionable:
+            for partition_dim, partition_degree in partition_spec.items():
+                if unpartitioned_shape[partition_dim] % partition_degree != 0:
+                    raise RuntimeError(
+                        f"dim {partition_dim} of {unpartitioned_shape} not divisible by {partition_degree}"
+                    )
 
-        partition_dim = partition_dim or 0
-
-        if (
-            enforce_evenly_partitionable
-            and unpartitioned_shape[partition_dim] % partition_degree != 0
-        ):
-            raise RuntimeError(
-                f"dim {partition_dim} of {unpartitioned_shape} not divisible by {partition_degree}"
-            )
-
-        self._shape = unpartitioned_shape
-        self._numel = product(*unpartitioned_shape)
-        self._partition_dim = partition_dim
-        self._partition_degree = partition_degree
+        self._unpartitioned_shape = unpartitioned_shape
+        self._partition_spec = partition_spec
         self._bits_per_elt = bits_per_elt
-        self._bytes_per_elt = safe_divide(bits_per_elt, 8)
 
     def shape(self, partitioned: bool) -> Tuple[int, ...]:
-        if partitioned:
-            shape = list(self._shape)
-            shape[self._partition_dim] = safe_divide(
-                shape[self._partition_dim], self._partition_degree
-            )
-            return tuple(shape)
-        else:
-            return self._shape
+        return self.__get_shape(partitioned=partitioned)
 
     def numel(self, partitioned: bool) -> int:
         return self.__get_numel(partitioned=partitioned)
 
     def size(self, partitioned: bool) -> Size:
         return Size(
-            numel=self.__get_numel(partitioned=partitioned), bits_per_element=self._bits_per_elt
+            numel=self.__get_numel(partitioned=partitioned),
+            bits_per_element=self._bits_per_elt,
         )
 
-    def __get_numel(self, partitioned: bool) -> int:
+    def __get_shape(self, partitioned: bool) -> Tuple[int, ...]:
         if partitioned:
-            return ceil_divide(self._numel, self._partition_degree)
+            shape = list(self._unpartitioned_shape)
+            for partition_dim, partition_degree in self._partition_spec.items():
+                shape[partition_dim] = safe_divide(shape[partition_dim], partition_degree)
+            return tuple(shape)
         else:
-            return self._numel
+            return self._unpartitioned_shape
+
+    def __get_numel(self, partitioned: bool) -> int:
+        unpartitioned_numel = product(*self._unpartitioned_shape)
+        if partitioned and self._partition_spec:
+            total_partitioning_degree = product(*self._partition_spec.values())
+            return ceil_divide(unpartitioned_numel, total_partitioning_degree)
+        else:
+            return unpartitioned_numel

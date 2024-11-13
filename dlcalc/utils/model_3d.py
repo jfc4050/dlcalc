@@ -1,5 +1,6 @@
 import dataclasses
 from enum import Enum
+from typing import Optional
 
 from .configurations import ActivationCheckpointingType
 from .data import Size, TensorRepr
@@ -14,21 +15,20 @@ class ParallelConfig:
         PARTITION_GRADIENTS = 2
         PARTITION_PARAMETERS = 3
 
-    tp: int  # tensor parallel degree
-    pp: int  # pipeline parallel degree
-    dp: int  # data parallel degree
+    tp: int  # Tensor Parallel (TP) degree
+    cp: int  # Context Parallel (CP) degree
+    ep: int  # Expert Parallel (EP) degree
+    pp: int  # Pipeline Parallel (PP) degree
+    dp: int  # Data Parallel (DP) degree
 
-    vpp: int  # virtual pipeline parallel degree
+    vpp: int  # Virtual Pipeline Parallel (VPP) degree
 
-    sp_enabled: bool  # sequence parallel
+    sp_enabled: bool  # Sequence Parallel (SP) enablement
 
     zero_level: ZeroLevel
 
-    def mp_degree(self) -> int:
-        return self.tp * self.pp
-
     def world_size(self) -> int:
-        return self.tp * self.pp * self.dp
+        return self.tp * self.cp * self.pp * self.dp
 
 
 class DistributedAdamOptimizerStates:
@@ -45,11 +45,11 @@ class DistributedAdamOptimizerStates:
     unfilled buckets.
     """
 
-    def __init__(self, n_mp_params: int, store_param_remainders: bool, dp: int) -> None:
+    # NOTE: n_params here is meant to be the parameters in a pipeline stage.
+    def __init__(self, n_params: int, store_param_remainders: bool, dp: int) -> None:
         self.param_shard = TensorRepr(
-            unpartitioned_shape=(n_mp_params,),
-            partition_dim=0,
-            partition_degree=dp,
+            unpartitioned_shape=(n_params,),
+            partition_spec={0: dp},
             # apex has a optimization to avoid storing information that's redundant
             # between fp32 and fp16 weights. it can instead store an extra 16
             # bits of precision, which can be combined with bf16 weights to yield
@@ -58,16 +58,14 @@ class DistributedAdamOptimizerStates:
             enforce_evenly_partitionable=False,
         )
         self.exp_avg_shard = TensorRepr(
-            unpartitioned_shape=(n_mp_params,),
-            partition_dim=0,
-            partition_degree=dp,
+            unpartitioned_shape=(n_params,),
+            partition_spec={0: dp},
             bits_per_elt=32,
             enforce_evenly_partitionable=False,
         )
         self.exp_avg_sq_shard = TensorRepr(
-            unpartitioned_shape=(n_mp_params,),
-            partition_dim=0,
-            partition_degree=dp,
+            unpartitioned_shape=(n_params,),
+            partition_spec={0: dp},
             bits_per_elt=32,
             enforce_evenly_partitionable=False,
         )
@@ -77,9 +75,8 @@ class DistributedAdamOptimizerStates:
         # microbatch.
         # basically ZeRO2, but with no reduce-scatter between gradient accumulations.
         self.grad_buffer = TensorRepr(
-            unpartitioned_shape=(n_mp_params,),
-            partition_dim=None,
-            partition_degree=1,
+            unpartitioned_shape=(n_params,),
+            partition_spec={},
             bits_per_elt=32,
         )
 
@@ -125,6 +122,13 @@ def _sum(*summands: int) -> int:
 
 
 @dataclasses.dataclass
+class MoeCfg:
+    n_experts: int
+    experts_per_token: int
+    moe_frequency: float
+
+
+@dataclasses.dataclass
 class ThreeDParallelModel:
     """Representation of a 3D parallel transformer model."""
 
@@ -143,6 +147,7 @@ class ThreeDParallelModel:
 
     inter_sz: int
     glu: bool
+    moe_cfg: Optional[MoeCfg]
 
     rotary_embed: bool
 
@@ -167,74 +172,100 @@ class ThreeDParallelModel:
                 f"of PP={self.parallelism_cfg.pp} and VPP={self.parallelism_cfg.vpp}"
             )
 
+        if self.moe_cfg:
+            if not (self.moe_cfg.moe_frequency * self.n_layers).is_integer():
+                raise ValueError(
+                    f"invalid moe frequency {self.moe_cfg.moe_frequency} for layer number {self.n_layers}"
+                )
+            self.n_moe_layers = int(self.moe_cfg.moe_frequency * self.n_layers)
+            self.n_nml_layers = self.n_layers - self.n_moe_layers
+        else:
+            self.n_moe_layers = 0
+            self.n_nml_layers = self.n_layers
+
+        n_experts = self.moe_cfg.n_experts if self.moe_cfg else 1
+
         self.embed_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz, self.vocab_sz),
-            partition_dim=1,
-            partition_degree=self.parallelism_cfg.tp,
+            partition_spec={1: self.parallelism_cfg.tp},  # vocab-parallel
             bits_per_elt=self.bits_per_parameter,
         )
-        self.norm1_weight = TensorRepr(
+        self.pre_attn_norm_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz,),
-            partition_dim=None,
-            partition_degree=1,
+            partition_spec={},  # replicated
             bits_per_elt=self.bits_per_parameter,
         )
         self.qkv_weight = TensorRepr(
             unpartitioned_shape=(
                 self.hidden_sz,
+                # following common practice of merging Q + K + V matmuls.
                 (self.n_q_heads + 2 * self.n_kv_heads) * self.head_dim,
             ),
-            partition_dim=1,
-            partition_degree=self.parallelism_cfg.tp,
+            partition_spec={1: self.parallelism_cfg.tp},  # col parallel
             bits_per_elt=self.bits_per_parameter,
         )
         self.attn_out_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz, self.hidden_sz),
-            partition_dim=0,
-            partition_degree=self.parallelism_cfg.tp,
+            partition_spec={0: self.parallelism_cfg.tp},  # row parallel
             bits_per_elt=self.bits_per_parameter,
         )
         self.mlp_up_weight = TensorRepr(
-            # following common practice of merging up + gate matmuls in the event
-            # we're using GLU.
             unpartitioned_shape=(
                 self.hidden_sz,
+                # following common practice of merging up + gate matmuls in the event
+                # we're using GLU.
                 (self.inter_sz * 2) if self.glu else self.inter_sz,
             ),
-            partition_dim=1,
-            partition_degree=self.parallelism_cfg.tp,
+            partition_spec={1: self.parallelism_cfg.tp},  # col parallel
             bits_per_elt=self.bits_per_parameter,
         )
         self.mlp_down_weight = TensorRepr(
             unpartitioned_shape=(self.inter_sz, self.hidden_sz),
-            partition_dim=0,
-            partition_degree=self.parallelism_cfg.tp,
+            partition_spec={0: self.parallelism_cfg.tp},  # row parallel
             bits_per_elt=self.bits_per_parameter,
         )
-        self.norm2_weight = TensorRepr(
+        self.mlp_up_exp_weight = TensorRepr(
+            # following common practice of merging up + gate matmuls in the event
+            # we're using GLU.
+            unpartitioned_shape=(
+                n_experts,
+                self.hidden_sz,
+                (self.inter_sz * 2) if self.glu else self.inter_sz,
+            ),
+            partition_spec={0: self.parallelism_cfg.ep, 2: self.parallelism_cfg.tp},  # col parallel
+            bits_per_elt=self.bits_per_parameter,
+        )
+        self.mlp_down_exp_weight = TensorRepr(
+            unpartitioned_shape=(n_experts, self.inter_sz, self.hidden_sz),
+            partition_spec={0: self.parallelism_cfg.ep, 1: self.parallelism_cfg.tp},  # row parallel
+            bits_per_elt=self.bits_per_parameter,
+        )
+        self.pre_mlp_norm_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz,),
-            partition_dim=None,
-            partition_degree=1,
+            partition_spec={},  # replicated
             bits_per_elt=self.bits_per_parameter,
         )
-
-        n_params_most_loaded_pp_stage = self.__get_embedding_or_lm_head_size(
-            partitioned=True
-        ) + self.layers_per_pp_stage() * self.__get_transformer_block_n_params(partitioned=True)
 
         if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
             raise NotImplementedError
 
         self.states = ModelStates(
             params_shard=TensorRepr(
-                unpartitioned_shape=(self.get_total_n_params(partitioned=False),),
-                partition_dim=0,
-                partition_degree=self.parallelism_cfg.mp_degree(),
+                unpartitioned_shape=(
+                    self.__get_n_total_params(
+                        spmd_partitioned=True,
+                        mpmd_partitioned=True,
+                    ),
+                ),
+                partition_spec={},
                 bits_per_elt=self.bits_per_parameter,
                 enforce_evenly_partitionable=False,
             ),
             opt_states=DistributedAdamOptimizerStates(
-                n_mp_params=n_params_most_loaded_pp_stage,
+                n_params=self.__get_n_total_params(
+                    spmd_partitioned=True,
+                    mpmd_partitioned=True,
+                ),
                 store_param_remainders=True,  # TODO. should be configurable
                 dp=self.parallelism_cfg.dp,
             ),
@@ -246,7 +277,7 @@ class ThreeDParallelModel:
             * 1  # factor for forward only (1 GEMMs per op)
             * self.microbatch_sz
             * self.sequence_len
-            * self.get_total_n_params(partitioned=False)
+            * self.__get_n_active_params(partitioned=False)
         )
 
     def get_single_microbatch_bwd_flops(self) -> float:
@@ -255,40 +286,17 @@ class ThreeDParallelModel:
             * 2  # factor for backward only (2 GEMMs per op)
             * self.microbatch_sz
             * self.sequence_len
-            * self.get_total_n_params(partitioned=False)
+            * self.__get_n_active_params(partitioned=False)
         )
 
-    def get_total_n_params(self, partitioned: bool) -> int:
-        embedding_or_lm_head_n_params = self.__get_embedding_or_lm_head_size(
-            partitioned=partitioned
+    def get_n_total_params(self, partitioned: bool) -> int:
+        return self.__get_n_total_params(
+            spmd_partitioned=partitioned,
+            mpmd_partitioned=partitioned,
         )
-        transformer_block_n_params = self.__get_transformer_block_n_params(partitioned=partitioned)
 
-        if partitioned:
-            # we'll give the number of parameters on the most heavily loaded pipeline stage
-            return (
-                embedding_or_lm_head_n_params
-                + safe_divide(self.n_layers, self.parallelism_cfg.pp) * transformer_block_n_params
-            )
-        else:
-            embedding_or_lm_head_factor = 1 if self.tie_embeddings else 2
-            return (
-                embedding_or_lm_head_factor * embedding_or_lm_head_n_params
-                + self.n_layers * transformer_block_n_params
-            )
-
-    def __get_embedding_or_lm_head_size(self, partitioned: bool) -> int:
-        return self.embed_weight.size(partitioned=partitioned).numel()
-
-    def __get_transformer_block_n_params(self, partitioned: bool) -> int:
-        return _sum(
-            self.norm1_weight.size(partitioned=partitioned).numel(),
-            self.qkv_weight.size(partitioned=partitioned).numel(),
-            self.attn_out_weight.size(partitioned=partitioned).numel(),
-            self.norm2_weight.size(partitioned=partitioned).numel(),
-            self.mlp_up_weight.size(partitioned=partitioned).numel(),
-            self.mlp_down_weight.size(partitioned=partitioned).numel(),
-        )
+    def get_n_active_params(self, partitioned: bool) -> int:
+        return self.__get_n_active_params(partitioned=partitioned)
 
     def activation_size_per_microbatch_per_layer(self) -> Size:
         return Size(
@@ -307,11 +315,105 @@ class ThreeDParallelModel:
         )
 
     def layers_per_pp_stage(self) -> int:
-        return safe_divide(self.n_layers, self.parallelism_cfg.pp)
+        return sum(self.__n_layers(mpmd_partitioned=True, moe=moe) for moe in [False, True])
 
     def grad_bucket_numel(self) -> int:
         return ceil_divide(self.bucket_size_bytes, self.bits_per_grad // 8)
 
+    def __get_n_total_params(self, spmd_partitioned: bool, mpmd_partitioned: bool) -> int:
+        return _sum(
+            # we'll give the number of parameters on the most heavily loaded pipeline stage
+            # if PP=1 then the only pipeline stage must store both embedding and LM head.
+            (1 if (mpmd_partitioned and self.parallelism_cfg.pp > 1) or self.tie_embeddings else 2)
+            * self.__get_embedding_or_lm_head_size(spmd_partitioned=spmd_partitioned),
+            # add in the transformer blocks
+            sum(
+                self.__n_layers(mpmd_partitioned=mpmd_partitioned, moe=moe)
+                * self.__get_transformer_block_n_params(
+                    spmd_partitioned=spmd_partitioned,
+                    moe=moe,
+                    active=False,
+                    experts_per_token=None,
+                )
+                for moe in [False, True]
+            ),
+        )
+
+    def __get_n_active_params(self, partitioned: bool) -> int:
+        if not self.moe_cfg:
+            return self.__get_n_total_params(
+                spmd_partitioned=partitioned,
+                mpmd_partitioned=partitioned,
+            )
+
+        # we'll give the number of parameters on the most heavily loaded pipeline stage
+        # if PP=1 then the only pipeline stage must store both embedding and LM head.
+        return _sum(
+            # embedding/lmhead
+            (1 if (partitioned and self.parallelism_cfg.pp > 1) or self.tie_embeddings else 2)
+            * self.__get_embedding_or_lm_head_size(spmd_partitioned=partitioned),
+            # transformer blocks
+            sum(
+                self.__n_layers(mpmd_partitioned=partitioned, moe=moe)
+                * self.__get_transformer_block_n_params(
+                    spmd_partitioned=partitioned,
+                    moe=moe,
+                    active=True,
+                    experts_per_token=self.moe_cfg.experts_per_token,
+                )
+                for moe in [False, True]
+            ),
+        )
+
+    def __get_embedding_or_lm_head_size(self, spmd_partitioned: bool) -> int:
+        return self.embed_weight.size(partitioned=spmd_partitioned).numel()
+
+    def __get_transformer_block_n_params(
+        self,
+        spmd_partitioned: bool,
+        moe: bool,
+        # TODO. would rather not expose these.
+        active: bool,
+        experts_per_token: Optional[int],
+    ) -> int:
+        assert active == (experts_per_token is not None)
+
+        return _sum(
+            self.pre_attn_norm_weight.numel(partitioned=spmd_partitioned),
+            self.qkv_weight.numel(partitioned=spmd_partitioned),
+            self.attn_out_weight.numel(partitioned=spmd_partitioned),
+            self.pre_mlp_norm_weight.numel(partitioned=spmd_partitioned),
+            (
+                # if we're trying to compute active params, then we account for the
+                # fact that we'll apply topk mlps per token.
+                experts_per_token  # type: ignore[operator]
+                * _sum(
+                    self.mlp_up_weight.numel(partitioned=spmd_partitioned),
+                    self.mlp_down_weight.numel(partitioned=spmd_partitioned),
+                )
+                if active
+                else _sum(
+                    self.mlp_up_exp_weight.numel(partitioned=spmd_partitioned),
+                    self.mlp_down_exp_weight.numel(partitioned=spmd_partitioned),
+                )
+            )
+            if moe
+            else _sum(
+                self.mlp_up_weight.numel(partitioned=spmd_partitioned),
+                self.mlp_down_weight.numel(partitioned=spmd_partitioned),
+            ),
+        )
+
+    def __n_layers(self, mpmd_partitioned: bool, moe: bool) -> int:
+        # TODO. we're making the assumption that MoE and non-MoE layers
+        # can be evenly partitioned.
+        n_layers = self.n_moe_layers if moe else self.n_nml_layers
+        if mpmd_partitioned:
+            n_layers = safe_divide(n_layers, self.parallelism_cfg.pp)
+
+        return n_layers
+
+    # TODO. probably needs to be adjusted for MoE
     def __activation_numel_per_microbatch_per_layer(self) -> int:
         """
         See: Reducing Activation Recomputation in Large Transformer Models
@@ -406,9 +508,19 @@ class ThreeDParallelModel:
             raise ValueError(f"unhandled checkpointing_type={self.act_ckpting_type}")
 
     def __tp_partition(self, unpartitoned_numel: int) -> int:
-        return safe_divide(unpartitoned_numel, self.parallelism_cfg.tp)
+        x = unpartitoned_numel
+        for parallelism_degree in [self.parallelism_cfg.cp, self.parallelism_cfg.tp]:
+            x = safe_divide(x, parallelism_degree)
+
+        return x
 
     def __sp_partition_if_on(self, unpartitioned_numel: int) -> int:
-        if not self.parallelism_cfg.sp_enabled:
-            return unpartitioned_numel
-        return safe_divide(unpartitioned_numel, self.parallelism_cfg.tp)
+        parallelism_degrees = [self.parallelism_cfg.cp]
+        if self.parallelism_cfg.sp_enabled:
+            parallelism_degrees.append(self.parallelism_cfg.tp)
+
+        x = unpartitioned_numel
+        for parallelism_degree in parallelism_degrees:
+            x = safe_divide(x, parallelism_degree)
+
+        return x

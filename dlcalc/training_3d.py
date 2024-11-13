@@ -21,7 +21,7 @@ from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.data import Size, TensorRepr
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import product, safe_divide
-from dlcalc.utils.model_3d import ParallelConfig, ThreeDParallelModel
+from dlcalc.utils.model_3d import MoeCfg, ParallelConfig, ThreeDParallelModel
 from dlcalc.utils.printing import print_section_header
 
 
@@ -43,6 +43,8 @@ def main() -> None:
     model_repr = ThreeDParallelModel(
         parallelism_cfg=ParallelConfig(
             tp=cfg["parallelism"]["tp"],
+            cp=cfg["parallelism"].get("cp", 1),
+            ep=cfg["parallelism"].get("ep", 1),
             pp=cfg["parallelism"]["pp"],
             dp=cfg["parallelism"]["dp"],
             vpp=cfg["parallelism"]["vpp"],
@@ -58,6 +60,13 @@ def main() -> None:
         head_dim=cfg["model"]["head_dim"],
         inter_sz=cfg["model"]["inter_sz"],
         glu=cfg["model"]["glu"],
+        moe_cfg=MoeCfg(
+            n_experts=cfg["model"]["moe"]["n_experts"],
+            experts_per_token=cfg["model"]["moe"]["experts_per_token"],
+            moe_frequency=cfg["model"]["moe"]["moe_frequency"],
+        )
+        if "moe" in cfg["model"]
+        else None,
         rotary_embed=cfg["model"]["rotary_embeds"],
         dropout=cfg["model"]["dropout"],
         vocab_sz=cfg["model"]["vocab_sz"],
@@ -84,16 +93,23 @@ def main() -> None:
     bs_per_mp_rank = safe_divide(gbs, model_repr.parallelism_cfg.dp)
     n_microbatches_per_mp_rank = safe_divide(bs_per_mp_rank, mbs)
 
-    print(f"gbs = {gbs}")
-    print(f"gbs/pipeline = {bs_per_mp_rank}")
-    print(f"n_microbatches/pipeline = {n_microbatches_per_mp_rank}")
+    print(f"GBS = {gbs} ({gbs * sequence_len * 1e-6:.2f}M tokens)")
+    print(f"GBS/DP = {bs_per_mp_rank}")
+    print(f"n_microbatches = {n_microbatches_per_mp_rank}")
+
+    ###################################################################################
+    # MODEL SUMMARY
+    ###################################################################################
+    print_section_header("MODEL SUMMARY")
+    print(
+        f"params: {model_repr.get_n_total_params(partitioned=False) * 1e-9:.2f}B "
+        f"({model_repr.get_n_active_params(partitioned=False) * 1e-9:.2f}B active)"
+    )
 
     ###################################################################################
     # MEMORY ANALYSIS
     ###################################################################################
-
     print_section_header("[MEMORY] STATES")
-    print(f"total params: {model_repr.get_total_n_params(partitioned=False) * 1e-9:.2f}B")
     print(model_repr.states)
 
     # activations
@@ -135,10 +151,12 @@ def main() -> None:
         ("ATTN_OUT", model_repr.attn_out_weight),
         ("MLP1", model_repr.mlp_up_weight),
         ("MLP2", model_repr.mlp_down_weight),
+        # TODO. need different section for MoE
     ]:
         weight_repr: TensorRepr  # type: ignore[no-redef]
         flops = compute_gemm_flops(
-            n_tokens=model_repr.sequence_len * model_repr.microbatch_sz,
+            n_tokens=safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
+            * model_repr.microbatch_sz,
             weight_shape=weight_repr.shape(partitioned=True),
         )
         print(
@@ -152,10 +170,14 @@ def main() -> None:
         gemm_input_dim, gemm_output_dim = weight_repr.shape(partitioned=True)
         weight_bytes = bytes_per_element * weight_repr.numel(partitioned=True)
         input_bytes = bytes_per_element * product(
-            model_repr.sequence_len, model_repr.microbatch_sz, gemm_input_dim
+            safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp),
+            model_repr.microbatch_sz,
+            gemm_input_dim,
         )
         output_bytes = bytes_per_element * product(
-            model_repr.sequence_len, model_repr.microbatch_sz, gemm_output_dim
+            safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp),
+            model_repr.microbatch_sz,
+            gemm_output_dim,
         )
         print(
             f"\tLOAD INPUT: {input_bytes * 1e-9:.2f} GB -> "
@@ -173,7 +195,7 @@ def main() -> None:
     print_section_header("TP COMMUNICATION")
     # TODO. assumes SP, analysis pretty similar if not SP though
     activation_size = Size(
-        numel=sequence_len * microbatch_sz * hidden_sz,
+        numel=safe_divide(sequence_len, model_repr.parallelism_cfg.cp) * microbatch_sz * hidden_sz,
         bits_per_element=model_repr.bits_per_parameter,
     )
     print(
@@ -204,6 +226,7 @@ def main() -> None:
     if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
+        # TODO. we need to fix these to account for EP and CP.
         ###############################################################################
         # compute the backward time for a single microbatch.
         ###############################################################################
