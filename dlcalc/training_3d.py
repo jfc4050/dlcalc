@@ -3,10 +3,12 @@
 import json
 import math
 from argparse import ArgumentParser
+from collections import OrderedDict
 
 import yaml
 
 from dlcalc.utils.comms import (
+    get_all_to_all_comm_time_s,
     get_dp_all_gather_bw_term_s,
     get_dp_all_gather_comm_time_s,
     get_dp_all_gather_latency_term_s,
@@ -216,11 +218,12 @@ def main() -> None:
     vpp = cfg["parallelism"]["vpp"]
     bs_per_mp_rank = safe_divide(gbs, model_repr.parallelism_cfg.dp)
     n_microbatches_per_mp_rank = safe_divide(bs_per_mp_rank, mbs)
+    pipeline_bubble_fraction = (
+        (1 / vpp) * (model_repr.parallelism_cfg.pp - 1) / n_microbatches_per_mp_rank
+    )
 
     print(f"VPP pipeline bubble multiplier = {(1 / vpp):.2f}")
-    print(
-        f"pipeline bubble fraction = {(1 / vpp) * (model_repr.parallelism_cfg.pp - 1) / n_microbatches_per_mp_rank:.2f}"
-    )
+    print(f"pipeline bubble fraction = {pipeline_bubble_fraction:.2f}")
 
     print_section_header("DP COMMUNICATION")
     if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
@@ -330,6 +333,104 @@ def main() -> None:
     ##################################################################################
     # Iteration Time
     ##################################################################################
+    print_section_header("ITERATION TIME (IN PROGRESS - DON'T TRUST ME)")
+
+    def compute_gemm_time_s(weight_repr: TensorRepr) -> int:
+        assumed_util = 0.7
+        flops = compute_gemm_flops(
+            n_tokens=safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
+            * model_repr.microbatch_sz,
+            weight_shape=weight_repr.shape(partitioned=True),
+        )
+        return flops / (machine_spec.device_spec.peak_flops * assumed_util)
+
+    ag_time_s = get_tp_all_gather_comm_time_s(
+        size=activation_size,
+        n_participants=model_repr.parallelism_cfg.tp,
+        machine_spec=machine_spec,
+    )
+    rs_time_s = get_tp_reduce_scatter_comm_time_s(
+        size=activation_size,
+        n_participants=model_repr.parallelism_cfg.tp,
+        machine_spec=machine_spec,
+    )
+    a2a_time_s = get_all_to_all_comm_time_s(
+        activation_size,
+        n_participants=model_repr.parallelism_cfg.ep,
+        machine_spec=machine_spec,
+    )
+    hbm_load_store_time_s = (
+        2 * activation_size.bytes() / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
+    )
+    transformer_block_time_components = OrderedDict(
+        # Attention
+        pre_attn_norm=hbm_load_store_time_s,  # norm approximation
+        rope=hbm_load_store_time_s,  # RoPE approximation
+        pre_attn_ag=ag_time_s,
+        qkv_proj=compute_gemm_time_s(model_repr.qkv_weight),
+        # TODO. ignoring SDPA time
+        attn_out_proj=compute_gemm_time_s(model_repr.attn_out_weight),
+        post_attn_rs=rs_time_s,
+        post_attn_residual=hbm_load_store_time_s,
+        # MLP
+        pre_mlp_norm=hbm_load_store_time_s,  # norm approximation
+        pre_mlp_a2a=a2a_time_s,
+        pre_mlp_ag=ag_time_s,
+        mlp_up_proj=compute_gemm_time_s(model_repr.mlp_up_weight),
+        mlp_down_proj=compute_gemm_time_s(model_repr.mlp_down_weight),
+        post_mlp_rs=rs_time_s,
+        post_mlp_a2a=a2a_time_s,
+        post_mlp_residual=hbm_load_store_time_s,
+        activation_send=activation_send_time_s,
+    )
+    print("ATTENTION BLOCK COMPONENTS")
+    for k, v in transformer_block_time_components.items():
+        print(k, f"{v * 1000:.2f}ms")
+
+    print(
+        f"total transformer block: {sum(transformer_block_time_components.values()) * 1000:.2f}ms"
+    )
+    print()
+
+    transformer_block_fwd_time = sum(transformer_block_time_components.values())
+    transformer_block_bwd_time = 2 * transformer_block_fwd_time
+    n_fwds = n_microbatches_per_mp_rank * layers_per_pp_stage
+    n_bwds = n_fwds
+
+    transformer_block_time = (
+        n_fwds * transformer_block_fwd_time + n_bwds * transformer_block_bwd_time
+    )
+    pipeline_bubble_time = transformer_block_time * pipeline_bubble_fraction
+
+    dp_ag_time = param_bucket_all_gather_time_s * n_buckets
+    dp_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets
+
+    iteration_time_components = OrderedDict(
+        tranformer_block_time=transformer_block_time,
+        pipeline_bubble_time=pipeline_bubble_time,
+        dp_ag_time=dp_ag_time,
+        dp_rs_time=dp_rs_time,
+    )
+
+    print("ITERATION TIME COMPONENTS")
+    for k, v in iteration_time_components.items():
+        print(k, f"{v * 1000:.2f}ms")
+    print()
+
+    iteration_time = sum(iteration_time_components.values())
+
+    print(f"iteration time: {iteration_time:.2f}s")
+
+    ideal_iteration_time = (
+        gbs
+        * sequence_len
+        * 6
+        * model_repr.get_n_active_params(partitioned=False)
+        / (cluster_size * machine_spec.device_spec.peak_flops)
+    )
+    print(f"ideal iteration time: {ideal_iteration_time:.2f}s")
+
+    print(f"predicted MFU: {(ideal_iteration_time / iteration_time) * 100:.2f}%")
 
 
 if __name__ == "__main__":
