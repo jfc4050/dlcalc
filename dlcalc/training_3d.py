@@ -374,6 +374,7 @@ def main() -> None:
         post_attn_residual=hbm_load_store_time_s,
         # MLP
         pre_mlp_norm=hbm_load_store_time_s,  # norm approximation
+        router=compute_gemm_time_s(model_repr.router_weight),
         pre_mlp_a2a=a2a_time_s,
         pre_mlp_ag=ag_time_s,
         mlp_up_proj=compute_gemm_time_s(model_repr.mlp_up_weight),
@@ -404,6 +405,8 @@ def main() -> None:
 
     dp_ag_time = param_bucket_all_gather_time_s * n_buckets
     dp_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets
+
+    # TODO. optimizer step. should just be time to read/write states + optim states
 
     iteration_time_components = OrderedDict(
         tranformer_block_time=transformer_block_time,
