@@ -401,12 +401,14 @@ def main() -> None:
         activation_send=activation_send_time_s,
     )
     print_h2_header("TRANSFORMER BLOCK COMPONENTS")
-    for k, v in transformer_block_time_components.items():
-        print(k.ljust(30), f"{v * 1000:.2f}ms")
+    total_transformer_block_time_s = sum(transformer_block_time_components.values())
+    for component_name, component_time_s in transformer_block_time_components.items():
+        print(
+            component_name.ljust(30),
+            f"{component_time_s * 1000:.2f}ms / {(component_time_s / total_transformer_block_time_s) * 100:.2f}%",
+        )
 
-    print(
-        f"total transformer block: {sum(transformer_block_time_components.values()) * 1000:.2f}ms"
-    )
+    print(f"total transformer block: {total_transformer_block_time_s * 1000:.2f}ms")
     print()
 
     transformer_block_fwd_time = sum(transformer_block_time_components.values())
@@ -438,13 +440,13 @@ def main() -> None:
     )
 
     print_h2_header("ITERATION TIME COMPONENTS")
-    for k, v in iteration_time_components.items():
-        print(k.ljust(30), f"{v * 1000:.2f}ms")
+    iteration_time_s = sum(iteration_time_components.values())
+    for component_name, component_time_s in iteration_time_components.items():
+        print(component_name.ljust(30), f"{component_time_s * 1000:.2f}ms / {(component_time_s / iteration_time_s) * 100:.2f}%")
     print()
 
     print_h2_header("SUMMARY")
-    iteration_time = sum(iteration_time_components.values())
-    print_bold(f"iteration time: {iteration_time:.2f}s")
+    print_bold(f"iteration time: {iteration_time_s:.2f}s")
 
     ideal_iteration_time = (
         gbs
@@ -455,7 +457,7 @@ def main() -> None:
     )
     print_bold(f"ideal iteration time: {ideal_iteration_time:.2f}s")
 
-    print_bold(f"predicted MFU: {(ideal_iteration_time / iteration_time) * 100:.2f}%")
+    print_bold(f"predicted MFU: {(ideal_iteration_time / iteration_time_s) * 100:.2f}%")
 
 
 if __name__ == "__main__":
