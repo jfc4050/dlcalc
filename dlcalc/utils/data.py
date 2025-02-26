@@ -33,6 +33,9 @@ class Size:
     def __mul__(self, multiplicand: int) -> "Size":
         return Size(self._numel * multiplicand, self._bits_per_element)
 
+    def __floordiv__(self, divisor: int) -> "Size":
+        return Size(self._numel // divisor, self._bits_per_element)
+
     def __rmul__(self, multiplicand: int) -> "Size":
         return Size(self._numel * multiplicand, self._bits_per_element)
 

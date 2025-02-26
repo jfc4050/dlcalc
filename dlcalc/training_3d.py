@@ -355,7 +355,7 @@ def main() -> None:
         machine_spec=machine_spec,
     )
     a2a_time_s = get_all_to_all_comm_time_s(
-        activation_size,
+        size=activation_size // model_repr.parallelism_cfg.tp // model_repr.parallelism_cfg.ep,
         n_participants=model_repr.parallelism_cfg.ep,
         machine_spec=machine_spec,
     )
@@ -383,7 +383,8 @@ def main() -> None:
         post_mlp_residual=hbm_load_store_time_s,
         activation_send=activation_send_time_s,
     )
-    print("ATTENTION BLOCK COMPONENTS")
+    print("TRANSFORMER BLOCK COMPONENTS")
+    print("----------------------------")
     for k, v in transformer_block_time_components.items():
         print(k, f"{v * 1000:.2f}ms")
 

@@ -11,6 +11,8 @@ some info on tree AR: https://github.com/NVIDIA/nccl/issues/545
 TODO. try to get estimates closer by accounting for NCCL protocols https://github.com/NVIDIA/nccl/issues/281
 """
 
+import math
+
 from .data import Size
 from .hardware import MachineSpec
 
@@ -168,3 +170,17 @@ def _get_ring_tp_ag_or_rs_comm_time_s(
     )
 
     return bw_term_s + lat_term_s
+
+
+def get_all_to_all_comm_time_s(
+    size: Size,
+    n_participants: int,
+    machine_spec: MachineSpec,
+) -> float:
+    lat_term_s = machine_spec.inter_node_connect.latency_sec
+
+    bw_term_s = (
+        size.bytes() / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
+    ) * n_participants
+
+    return (lat_term_s + bw_term_s) * (math.sqrt(n_participants) - 1)
