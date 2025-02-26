@@ -376,7 +376,7 @@ def main() -> None:
     )
     sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
-    transformer_block_time_components = OrderedDict(
+    transformer_block_time_components: dict[str, float] = OrderedDict(
         # Attention
         pre_attn_norm=hbm_load_store_time_s,  # norm approximation
         rope=hbm_load_store_time_s,  # RoPE approximation
@@ -389,6 +389,8 @@ def main() -> None:
         # MLP
         pre_mlp_norm=hbm_load_store_time_s,  # norm approximation
         router=compute_gemm_time_s(model_repr.router_weight),
+        # bunch of router operations that are hard to project and
+        # are highly implementation dependent.
         pre_mlp_a2a=a2a_time_s,
         pre_mlp_ag=ag_time_s,
         mlp_up_proj=compute_gemm_time_s(model_repr.mlp_up_weight),
@@ -400,7 +402,7 @@ def main() -> None:
     )
     print_h2_header("TRANSFORMER BLOCK COMPONENTS")
     for k, v in transformer_block_time_components.items():
-        print(k, f"{v * 1000:.2f}ms")
+        print(k.ljust(30), f"{v * 1000:.2f}ms")
 
     print(
         f"total transformer block: {sum(transformer_block_time_components.values()) * 1000:.2f}ms"
@@ -420,18 +422,24 @@ def main() -> None:
     dp_ag_time = param_bucket_all_gather_time_s * n_buckets
     dp_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets
 
-    # TODO. optimizer step. should just be time to read/write states + optim states
+    # approximating optimizer step time as time to read/write states + optim states to/from HBM
+    opt_step_time_s = (
+        2
+        * model_repr.states.total_bytes(partitioned=True)
+        / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
+    )
 
-    iteration_time_components = OrderedDict(
-        tranformer_block_time=transformer_block_time,
-        pipeline_bubble_time=pipeline_bubble_time,
-        dp_ag_time=dp_ag_time,
-        dp_rs_time=dp_rs_time,
+    iteration_time_components: dict[str, float] = OrderedDict(
+        dp_ag=dp_ag_time,
+        transformer_block=transformer_block_time,
+        pipeline_bubble=pipeline_bubble_time,
+        dp_rs=dp_rs_time,
+        opt_step=opt_step_time_s,
     )
 
     print_h2_header("ITERATION TIME COMPONENTS")
     for k, v in iteration_time_components.items():
-        print(k, f"{v * 1000:.2f}ms")
+        print(k.ljust(30), f"{v * 1000:.2f}ms")
     print()
 
     print_h2_header("SUMMARY")
