@@ -24,7 +24,7 @@ from dlcalc.utils.data import Size, TensorRepr
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import product, safe_divide
 from dlcalc.utils.model_3d import MoeCfg, ParallelConfig, ThreeDParallelModel
-from dlcalc.utils.printing import print_section_header
+from dlcalc.utils.printing import print_bold, print_h1_header, print_h2_header
 
 
 def main() -> None:
@@ -35,7 +35,7 @@ def main() -> None:
     with open(args.cfg_path) as f:
         cfg = yaml.safe_load(f)
 
-    print_section_header("CONFIG")
+    print_h1_header("CONFIG")
     print(json.dumps(cfg, indent=2))
 
     sequence_len = cfg["data"]["seqlen"]
@@ -88,7 +88,7 @@ def main() -> None:
     ###################################################################################
     # DATA
     ###################################################################################
-    print_section_header("DATA")
+    print_h1_header("DATA")
     gbs = cfg["data"]["gbs"]
     mbs = cfg["data"]["microbatch_sz"]
 
@@ -102,7 +102,7 @@ def main() -> None:
     ###################################################################################
     # MODEL SUMMARY
     ###################################################################################
-    print_section_header("MODEL SUMMARY")
+    print_h1_header("MODEL SUMMARY")
     print(
         f"params: {model_repr.get_n_total_params(partitioned=False) * 1e-9:.2f}B "
         f"({model_repr.get_n_active_params(partitioned=False) * 1e-9:.2f}B active)"
@@ -111,11 +111,11 @@ def main() -> None:
     ###################################################################################
     # MEMORY ANALYSIS
     ###################################################################################
-    print_section_header("[MEMORY] STATES")
+    print_h1_header("[MEMORY] STATES")
     print(model_repr.states)
 
     # activations
-    print_section_header("[MEMORY] TRAINING ACTIVATIONS")
+    print_h1_header("[MEMORY] TRAINING ACTIVATIONS")
     act_size_per_layer_per_inflight_microbatch = (
         model_repr.activation_size_per_microbatch_per_layer()
     )
@@ -139,7 +139,7 @@ def main() -> None:
         f"{act_memory}"
     )
 
-    print_section_header("[MEMORY] TOTAL")
+    print_h1_header("[MEMORY] TOTAL")
     print(
         f"total mem (GiB) = {(model_repr.states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
     )
@@ -147,7 +147,7 @@ def main() -> None:
     ###################################################################################
     # PERF ANALYSIS
     ###################################################################################
-    print_section_header("GEMMs (note numbers calculated for 100% flops+bandwidth utilization)")
+    print_h1_header("GEMMs (note numbers calculated for 100% flops+bandwidth utilization)")
     for proj_name, weight_repr in [
         ("QKV", model_repr.qkv_weight),
         ("ATTN_OUT", model_repr.attn_out_weight),
@@ -194,7 +194,7 @@ def main() -> None:
             f"{output_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms"
         )
 
-    print_section_header("TP COMMUNICATION")
+    print_h1_header("TP COMMUNICATION")
     # TODO. assumes SP, analysis pretty similar if not SP though
     activation_size = Size(
         numel=safe_divide(sequence_len, model_repr.parallelism_cfg.cp) * microbatch_sz * hidden_sz,
@@ -207,13 +207,13 @@ def main() -> None:
         f"TP reduce-scatter: {activation_size}: {get_tp_reduce_scatter_comm_time_s(size=activation_size, n_participants=model_repr.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
     )
 
-    print_section_header("PP COMMUNICATION")
+    print_h1_header("PP COMMUNICATION")
     activation_send_time_s = (
         activation_size.bytes() / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
     )
     print(f"PP send/recv: {activation_size}: {activation_send_time_s * 1000:.3f} ms")
 
-    print_section_header("PIPELINE BUBBLE")
+    print_h1_header("PIPELINE BUBBLE")
 
     vpp = cfg["parallelism"]["vpp"]
     bs_per_mp_rank = safe_divide(gbs, model_repr.parallelism_cfg.dp)
@@ -225,7 +225,7 @@ def main() -> None:
     print(f"VPP pipeline bubble multiplier = {(1 / vpp):.2f}")
     print(f"pipeline bubble fraction = {pipeline_bubble_fraction:.2f}")
 
-    print_section_header("DP COMMUNICATION")
+    print_h1_header("DP COMMUNICATION")
     if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
@@ -333,7 +333,7 @@ def main() -> None:
     ##################################################################################
     # Iteration Time
     ##################################################################################
-    print_section_header("ITERATION TIME (IN PROGRESS - DON'T TRUST ME)")
+    print_h1_header("ITERATION TIME (IN PROGRESS - DON'T TRUST ME)")
 
     def compute_gemm_time_s(weight_repr: TensorRepr) -> int:
         assumed_util = 0.7
@@ -383,8 +383,7 @@ def main() -> None:
         post_mlp_residual=hbm_load_store_time_s,
         activation_send=activation_send_time_s,
     )
-    print("TRANSFORMER BLOCK COMPONENTS")
-    print("----------------------------")
+    print_h2_header("TRANSFORMER BLOCK COMPONENTS")
     for k, v in transformer_block_time_components.items():
         print(k, f"{v * 1000:.2f}ms")
 
@@ -413,14 +412,14 @@ def main() -> None:
         dp_rs_time=dp_rs_time,
     )
 
-    print("ITERATION TIME COMPONENTS")
+    print_h2_header("ITERATION TIME COMPONENTS")
     for k, v in iteration_time_components.items():
         print(k, f"{v * 1000:.2f}ms")
     print()
 
+    print_h2_header("SUMMARY")
     iteration_time = sum(iteration_time_components.values())
-
-    print(f"iteration time: {iteration_time:.2f}s")
+    print_bold(f"iteration time: {iteration_time:.2f}s")
 
     ideal_iteration_time = (
         gbs
@@ -429,9 +428,9 @@ def main() -> None:
         * model_repr.get_n_active_params(partitioned=False)
         / (cluster_size * machine_spec.device_spec.peak_flops)
     )
-    print(f"ideal iteration time: {ideal_iteration_time:.2f}s")
+    print_bold(f"ideal iteration time: {ideal_iteration_time:.2f}s")
 
-    print(f"predicted MFU: {(ideal_iteration_time / iteration_time) * 100:.2f}%")
+    print_bold(f"predicted MFU: {(ideal_iteration_time / iteration_time) * 100:.2f}%")
 
 
 if __name__ == "__main__":
