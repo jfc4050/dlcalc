@@ -26,6 +26,8 @@ from dlcalc.utils.math import product, safe_divide
 from dlcalc.utils.model_3d import MoeCfg, ParallelConfig, ThreeDParallelModel
 from dlcalc.utils.printing import print_bold, print_h1_header, print_h2_header
 
+ASSUMED_GEMM_UTIL = 0.7
+
 
 def main() -> None:
     parser = ArgumentParser(__doc__)
@@ -336,13 +338,12 @@ def main() -> None:
     print_h1_header("ITERATION TIME (IN PROGRESS - DON'T TRUST ME)")
 
     def compute_gemm_time_s(weight_repr: TensorRepr) -> int:
-        assumed_util = 0.7
         flops = compute_gemm_flops(
             n_tokens=safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
             * model_repr.microbatch_sz,
             weight_shape=weight_repr.shape(partitioned=True),
         )
-        return flops / (machine_spec.device_spec.peak_flops * assumed_util)
+        return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
     ag_time_s = get_tp_all_gather_comm_time_s(
         size=activation_size,
@@ -362,13 +363,26 @@ def main() -> None:
     hbm_load_store_time_s = (
         2 * activation_size.bytes() / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
     )
+
+    # SDPA time
+    n_heads_per_tp_partition = model_repr.n_q_heads // model_repr.parallelism_cfg.tp
+    sdpa_flops = sum(
+        [
+            # Q @ K.T
+            2 * n_heads_per_tp_partition * sequence_len * model_repr.head_dim * sequence_len,
+            # A @ V
+            2 * n_heads_per_tp_partition * sequence_len * sequence_len * model_repr.head_dim,
+        ]
+    )
+    sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
+
     transformer_block_time_components = OrderedDict(
         # Attention
         pre_attn_norm=hbm_load_store_time_s,  # norm approximation
         rope=hbm_load_store_time_s,  # RoPE approximation
         pre_attn_ag=ag_time_s,
         qkv_proj=compute_gemm_time_s(model_repr.qkv_weight),
-        # TODO. ignoring SDPA time
+        sdpa=sdpa_time,
         attn_out_proj=compute_gemm_time_s(model_repr.attn_out_weight),
         post_attn_rs=rs_time_s,
         post_attn_residual=hbm_load_store_time_s,
