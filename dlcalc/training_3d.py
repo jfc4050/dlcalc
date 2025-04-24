@@ -416,7 +416,7 @@ def main() -> None:
             2 * n_heads_per_tp_partition * sequence_len * sequence_len * model_repr.head_dim,
         ]
     )
-    sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
+    sdpa_time = (sdpa_flops // model_repr.parallelism_cfg.cp) / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
     # TODO. need to have different ones between expert and nonexpert
     transformer_block_time_components: dict[str, float] = OrderedDict(
