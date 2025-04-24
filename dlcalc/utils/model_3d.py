@@ -125,6 +125,7 @@ def _sum(*summands: int) -> int:
 class MoeCfg:
     n_experts: int
     experts_per_token: int
+    capacity_factor: float
     moe_frequency: float
 
 

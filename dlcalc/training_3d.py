@@ -67,6 +67,7 @@ def main() -> None:
         moe_cfg=MoeCfg(
             n_experts=cfg["model"]["moe"]["n_experts"],
             experts_per_token=cfg["model"]["moe"]["experts_per_token"],
+            capacity_factor=cfg["model"]["moe"]["capacity_factor"],
             moe_frequency=cfg["model"]["moe"]["moe_frequency"],
         )
         if "moe" in cfg["model"]
@@ -336,11 +337,11 @@ def main() -> None:
     # Iteration Time
     ##################################################################################
     print_h1_header("ITERATION TIME (IN PROGRESS - DON'T TRUST ME)")
+    n_tokens = model_repr.microbatch_sz * model_repr.sequence_len
 
     def compute_gemm_time_s(weight_repr: TensorRepr) -> int:
         flops = compute_gemm_flops(
-            n_tokens=safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
-            * model_repr.microbatch_sz,
+            n_tokens=safe_divide(n_tokens, model_repr.parallelism_cfg.cp),
             weight_shape=weight_repr.shape(partitioned=True),
         )
         return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
@@ -355,11 +356,52 @@ def main() -> None:
         n_participants=model_repr.parallelism_cfg.tp,
         machine_spec=machine_spec,
     )
+
+    n_tokens_per_expert = (
+        model_repr.microbatch_sz
+        * model_repr.sequence_len
+        * model_repr.moe_cfg.experts_per_token
+        * model_repr.moe_cfg.capacity_factor
+    ) // model_repr.moe_cfg.n_experts
+
+    activation_size_expert_region = Size(
+        numel=safe_divide(n_tokens_per_expert, model_repr.parallelism_cfg.cp)
+        * model_repr.hidden_sz,
+        bits_per_element=model_repr.bits_per_parameter,
+    )
+
+    def compute_expert_gemm_time_s(weight_repr: TensorRepr) -> int:
+        n_local_experts, *gemm_dims = weight_repr.shape(partitioned=True)
+        flops = n_local_experts * compute_gemm_flops(
+            n_tokens=safe_divide(n_tokens_per_expert, model_repr.parallelism_cfg.cp),
+            weight_shape=gemm_dims,
+        )
+        return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
+
     a2a_time_s = get_all_to_all_comm_time_s(
-        size=activation_size // model_repr.parallelism_cfg.tp // model_repr.parallelism_cfg.ep,
+        size=Size(
+            safe_divide(
+                n_tokens_per_expert * model_repr.moe_cfg.n_experts,
+                model_repr.parallelism_cfg.cp * model_repr.parallelism_cfg.tp,
+            )
+            * hidden_sz,
+            bits_per_element=model_repr.bits_per_parameter,
+        ),
         n_participants=model_repr.parallelism_cfg.ep,
         machine_spec=machine_spec,
     )
+
+    expert_ag_time_s = get_tp_all_gather_comm_time_s(
+        size=activation_size_expert_region,
+        n_participants=model_repr.parallelism_cfg.tp,
+        machine_spec=machine_spec,
+    )
+    expert_rs_time_s = get_tp_reduce_scatter_comm_time_s(
+        size=activation_size_expert_region,
+        n_participants=model_repr.parallelism_cfg.tp,
+        machine_spec=machine_spec,
+    )
+
     hbm_load_store_time_s = (
         2 * activation_size.bytes() / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
     )
@@ -376,6 +418,7 @@ def main() -> None:
     )
     sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
+    # TODO. need to have different ones between expert and nonexpert
     transformer_block_time_components: dict[str, float] = OrderedDict(
         # Attention
         pre_attn_norm=hbm_load_store_time_s,  # norm approximation
@@ -392,10 +435,10 @@ def main() -> None:
         # bunch of router operations that are hard to project and
         # are highly implementation dependent.
         pre_mlp_a2a=a2a_time_s,
-        pre_mlp_ag=ag_time_s,
-        mlp_up_proj=compute_gemm_time_s(model_repr.mlp_up_weight),
-        mlp_down_proj=compute_gemm_time_s(model_repr.mlp_down_weight),
-        post_mlp_rs=rs_time_s,
+        pre_mlp_ag=expert_ag_time_s,
+        mlp_up_proj=compute_expert_gemm_time_s(model_repr.mlp_up_exp_weight),
+        mlp_down_proj=compute_expert_gemm_time_s(model_repr.mlp_down_exp_weight),
+        post_mlp_rs=expert_rs_time_s,
         post_mlp_a2a=a2a_time_s,
         post_mlp_residual=hbm_load_store_time_s,
         activation_send=activation_send_time_s,
@@ -442,7 +485,10 @@ def main() -> None:
     print_h2_header("ITERATION TIME COMPONENTS")
     iteration_time_s = sum(iteration_time_components.values())
     for component_name, component_time_s in iteration_time_components.items():
-        print(component_name.ljust(30), f"{component_time_s * 1000:.2f}ms / {(component_time_s / iteration_time_s) * 100:.2f}%")
+        print(
+            component_name.ljust(30),
+            f"{component_time_s * 1000:.2f}ms / {(component_time_s / iteration_time_s) * 100:.2f}%",
+        )
     print()
 
     print_h2_header("SUMMARY")
@@ -455,7 +501,7 @@ def main() -> None:
         * model_repr.get_n_active_params(partitioned=False)
         / (cluster_size * machine_spec.device_spec.peak_flops)
     )
-    print_bold(f"ideal iteration time: {ideal_iteration_time:.2f}s")
+    print_bold(f"ideal iteration time: {ideal_iteration_time:.5f}s")
 
     print_bold(f"predicted MFU: {(ideal_iteration_time / iteration_time_s) * 100:.2f}%")
 

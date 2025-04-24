@@ -11,8 +11,6 @@ some info on tree AR: https://github.com/NVIDIA/nccl/issues/545
 TODO. try to get estimates closer by accounting for NCCL protocols https://github.com/NVIDIA/nccl/issues/281
 """
 
-import math
-
 from .data import Size
 from .hardware import MachineSpec
 
@@ -179,8 +177,10 @@ def get_all_to_all_comm_time_s(
 ) -> float:
     lat_term_s = machine_spec.inter_node_connect.latency_sec
 
-    bw_term_s = (
-        size.bytes() / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
-    ) * n_participants
+    # we'll just model it as simultaneous sends of partition to all other participants.
+    bw_term_s = ((size.bytes() // n_participants) * (n_participants - 1)) / (
+        # tendency is for horrible BW utilization.
+        0.2 * machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
+    )
 
-    return (lat_term_s + bw_term_s) * (math.sqrt(n_participants) - 1)
+    return lat_term_s + bw_term_s
