@@ -124,6 +124,7 @@ def _sum(*summands: int) -> int:
 @dataclasses.dataclass
 class MoeCfg:
     n_experts: int
+    expert_inter_sz: int
     experts_per_token: int
     capacity_factor: float
     moe_frequency: float
@@ -239,13 +240,13 @@ class ThreeDParallelModel:
             unpartitioned_shape=(
                 n_experts,
                 self.hidden_sz,
-                (self.inter_sz * 2) if self.glu else self.inter_sz,
+                (self.moe_cfg.expert_inter_sz * 2) if self.glu else self.moe_cfg.expert_inter_sz,
             ),
             partition_spec={0: self.parallelism_cfg.ep, 2: self.parallelism_cfg.tp},  # col parallel
             bits_per_elt=self.bits_per_parameter,
         )
         self.mlp_down_exp_weight = TensorRepr(
-            unpartitioned_shape=(n_experts, self.inter_sz, self.hidden_sz),
+            unpartitioned_shape=(n_experts, self.moe_cfg.expert_inter_sz, self.hidden_sz),
             partition_spec={0: self.parallelism_cfg.ep, 1: self.parallelism_cfg.tp},  # row parallel
             bits_per_elt=self.bits_per_parameter,
         )
@@ -397,8 +398,8 @@ class ThreeDParallelModel:
                 # fact that we'll apply topk mlps per token.
                 experts_per_token  # type: ignore[operator]
                 * _sum(
-                    self.mlp_up_weight.numel(partitioned=spmd_partitioned),
-                    self.mlp_down_weight.numel(partitioned=spmd_partitioned),
+                    self.mlp_up_exp_weight.numel(partitioned=spmd_partitioned) // self.moe_cfg.n_experts,
+                    self.mlp_down_exp_weight.numel(partitioned=spmd_partitioned) // self.moe_cfg.n_experts,
                 )
                 if active
                 else _sum(

@@ -66,6 +66,7 @@ def main() -> None:
         glu=cfg["model"]["glu"],
         moe_cfg=MoeCfg(
             n_experts=cfg["model"]["moe"]["n_experts"],
+            expert_inter_sz=cfg["model"]["moe"]["expert_inter_sz"],
             experts_per_token=cfg["model"]["moe"]["experts_per_token"],
             capacity_factor=cfg["model"]["moe"]["capacity_factor"],
             moe_frequency=cfg["model"]["moe"]["moe_frequency"],
