@@ -389,6 +389,7 @@ def main() -> None:
             bits_per_element=model_repr.bits_per_parameter,
         ),
         n_participants=model_repr.parallelism_cfg.ep,
+        mp_degree_in_node=mp_degree_in_node,
         machine_spec=machine_spec,
     )
 

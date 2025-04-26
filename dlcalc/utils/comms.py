@@ -173,14 +173,14 @@ def _get_ring_tp_ag_or_rs_comm_time_s(
 def get_all_to_all_comm_time_s(
     size: Size,
     n_participants: int,
+    mp_degree_in_node: int,
     machine_spec: MachineSpec,
 ) -> float:
     lat_term_s = machine_spec.inter_node_connect.latency_sec
 
     # we'll just model it as simultaneous sends of partition to all other participants.
     bw_term_s = ((size.bytes() // n_participants) * (n_participants - 1)) / (
-        # tendency is for horrible BW utilization.
-        0.2 * machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
+        machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / mp_degree_in_node
     )
 
     return lat_term_s + bw_term_s
