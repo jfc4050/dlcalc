@@ -358,23 +358,17 @@ def main() -> None:
         machine_spec=machine_spec,
     )
 
-    n_tokens_per_expert = (
+    expert_capacity = (
         model_repr.microbatch_sz
         * model_repr.sequence_len
         * model_repr.moe_cfg.experts_per_token
         * model_repr.moe_cfg.capacity_factor
     ) // model_repr.moe_cfg.n_experts
 
-    activation_size_expert_region = Size(
-        numel=safe_divide(n_tokens_per_expert, model_repr.parallelism_cfg.cp)
-        * model_repr.hidden_sz,
-        bits_per_element=model_repr.bits_per_parameter,
-    )
-
     def compute_expert_gemm_time_s(weight_repr: TensorRepr) -> int:
         n_local_experts, *gemm_dims = weight_repr.shape(partitioned=True)
         flops = n_local_experts * compute_gemm_flops(
-            n_tokens=safe_divide(n_tokens_per_expert, model_repr.parallelism_cfg.cp),
+            n_tokens=expert_capacity,
             weight_shape=gemm_dims,
         )
         return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
@@ -382,7 +376,7 @@ def main() -> None:
     a2a_time_s = get_all_to_all_comm_time_s(
         size=Size(
             safe_divide(
-                n_tokens_per_expert * model_repr.moe_cfg.n_experts,
+                expert_capacity * model_repr.moe_cfg.n_experts,
                 model_repr.parallelism_cfg.cp * model_repr.parallelism_cfg.tp,
             )
             * hidden_sz,
@@ -394,12 +388,22 @@ def main() -> None:
     )
 
     expert_ag_time_s = get_tp_all_gather_comm_time_s(
-        size=activation_size_expert_region,
+        size=Size(
+            numel=expert_capacity
+            * safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep)
+            * model_repr.hidden_sz,
+            bits_per_element=model_repr.bits_per_parameter,
+        ),
         n_participants=model_repr.parallelism_cfg.tp,
         machine_spec=machine_spec,
     )
     expert_rs_time_s = get_tp_reduce_scatter_comm_time_s(
-        size=activation_size_expert_region,
+        size=Size(
+            numel=expert_capacity
+            * safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep)
+            * model_repr.hidden_sz,
+            bits_per_element=model_repr.bits_per_parameter,
+        ),
         n_participants=model_repr.parallelism_cfg.tp,
         machine_spec=machine_spec,
     )
@@ -418,7 +422,9 @@ def main() -> None:
             2 * n_heads_per_tp_partition * sequence_len * sequence_len * model_repr.head_dim,
         ]
     )
-    sdpa_time = (sdpa_flops // model_repr.parallelism_cfg.cp) / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
+    sdpa_time = (sdpa_flops // model_repr.parallelism_cfg.cp) / (
+        machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL
+    )
 
     # TODO. need to have different ones between expert and nonexpert
     transformer_block_time_components: dict[str, float] = OrderedDict(
