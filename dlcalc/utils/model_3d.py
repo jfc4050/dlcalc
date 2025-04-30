@@ -411,6 +411,9 @@ class ThreeDParallelModel:
         assert active == (experts_per_token is not None)
 
         if moe:
+            assert self.moe_cfg is not None
+            assert self.mlp_up_exp_weight is not None
+            assert self.mlp_down_exp_weight is not None
             mlp_params = (
                 # if we're trying to compute active params, then we account for the
                 # fact that we'll apply topk mlps per token.
