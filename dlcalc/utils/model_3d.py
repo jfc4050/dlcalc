@@ -128,6 +128,7 @@ class MoeCfg:
     experts_per_token: int
     capacity_factor: float
     moe_frequency: float
+    expert_tp_degree: int
 
 
 @dataclasses.dataclass

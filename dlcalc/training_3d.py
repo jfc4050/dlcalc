@@ -70,6 +70,7 @@ def main() -> None:
             experts_per_token=cfg["model"]["moe"]["experts_per_token"],
             capacity_factor=cfg["model"]["moe"]["capacity_factor"],
             moe_frequency=cfg["model"]["moe"]["moe_frequency"],
+            expert_tp_degree=cfg["model"]["moe"]["expert_tp_degree"],
         )
         if "moe" in cfg["model"]
         else None,
@@ -358,28 +359,53 @@ def main() -> None:
         machine_spec=machine_spec,
     )
 
+    # this is the total (i.e. unpartitioned) number of tokens received by each expert
+    # note: this is done per "global microbatch" which means that in addition to token
+    # partitioning parallelism impacting routing decisions, microbatching does as well.
     expert_capacity = (
-        model_repr.microbatch_sz
+        (model_repr.microbatch_sz * model_repr.parallelism_cfg.dp)
         * model_repr.sequence_len
-        * model_repr.moe_cfg.experts_per_token
+        * model_repr.moe_cfg.experts_per_token  # or k in other words
         * model_repr.moe_cfg.capacity_factor
     ) // model_repr.moe_cfg.n_experts
+    print(f"expert capacity: {expert_capacity}")
 
-    def compute_expert_gemm_time_s(weight_repr: TensorRepr) -> int:
+    def compute_expert_gemm_time_s(n_tokens_per_expert: int, weight_repr: TensorRepr) -> int:
         n_local_experts, *gemm_dims = weight_repr.shape(partitioned=True)
         flops = n_local_experts * compute_gemm_flops(
-            n_tokens=expert_capacity,
+            n_tokens=n_tokens_per_expert,
             weight_shape=gemm_dims,
         )
         return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
+    token_partition_degree_nonexp = (
+        # pp does not partition tokens
+        model_repr.parallelism_cfg.dp  # partition along batch
+        # ep does not partition tokens
+        * model_repr.parallelism_cfg.cp  # partition along sequence
+        * model_repr.parallelism_cfg.tp  # partition along sequence (SP)
+    )
+    # EP parallelism comes from one or more of the token partitioning dimensions,
+    # so we have less token partitioning in the expert region.
+    # token_partition_degree_exp * EP = token_partition_degree_nonexp
+    token_partition_degree_exp = safe_divide(
+        token_partition_degree_nonexp,
+        model_repr.parallelism_cfg.ep,
+    )
+
+    n_tokens_per_token_partition_nonexp = safe_divide(
+        expert_capacity * model_repr.moe_cfg.n_experts,
+        token_partition_degree_nonexp,
+    )
+    print("n_tokens_per_token_partition_nonexp:", n_tokens_per_token_partition_nonexp)
+
+    # the alltoall will trade token partitioning along the capacity dimension
+    # for token partitioning along the experts dimension. i.e. we'll go from:
+    # (capacity / prod(token_partitioning_degrees_exp) / EP, n_experts) to
+    # (capacity / prod(token_partitioning_degrees_exp), n_experts / EP)
     a2a_time_s = get_all_to_all_comm_time_s(
         size=Size(
-            safe_divide(
-                expert_capacity * model_repr.moe_cfg.n_experts,
-                model_repr.parallelism_cfg.cp * model_repr.parallelism_cfg.tp,
-            )
-            * hidden_sz,
+            n_tokens_per_token_partition_nonexp * hidden_sz,
             bits_per_element=model_repr.bits_per_parameter,
         ),
         n_participants=model_repr.parallelism_cfg.ep,
@@ -387,24 +413,26 @@ def main() -> None:
         machine_spec=machine_spec,
     )
 
+    n_tokens_per_token_partition_exp = safe_divide(
+        expert_capacity * safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep),
+        token_partition_degree_exp,
+    )
+    expert_region_n_tokens = n_tokens_per_token_partition_exp * model_repr.moe_cfg.expert_tp_degree
+
     expert_ag_time_s = get_tp_all_gather_comm_time_s(
         size=Size(
-            numel=expert_capacity
-            * safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep)
-            * model_repr.hidden_sz,
+            numel=expert_region_n_tokens * model_repr.hidden_sz,
             bits_per_element=model_repr.bits_per_parameter,
         ),
-        n_participants=model_repr.parallelism_cfg.tp,
+        n_participants=model_repr.moe_cfg.expert_tp_degree,
         machine_spec=machine_spec,
     )
     expert_rs_time_s = get_tp_reduce_scatter_comm_time_s(
         size=Size(
-            numel=expert_capacity
-            * safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep)
-            * model_repr.hidden_sz,
+            expert_region_n_tokens * model_repr.hidden_sz,
             bits_per_element=model_repr.bits_per_parameter,
         ),
-        n_participants=model_repr.parallelism_cfg.tp,
+        n_participants=model_repr.moe_cfg.expert_tp_degree,
         machine_spec=machine_spec,
     )
 
@@ -444,13 +472,26 @@ def main() -> None:
         # are highly implementation dependent.
         pre_mlp_a2a=a2a_time_s,
         pre_mlp_ag=expert_ag_time_s,
-        mlp_up_proj=compute_expert_gemm_time_s(model_repr.mlp_up_exp_weight),
-        mlp_down_proj=compute_expert_gemm_time_s(model_repr.mlp_down_exp_weight),
+        mlp_up_proj=compute_expert_gemm_time_s(
+            n_tokens_per_expert=safe_divide(
+                expert_region_n_tokens,
+                safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep),
+            ),
+            weight_repr=model_repr.mlp_up_exp_weight,
+        ),
+        mlp_down_proj=compute_expert_gemm_time_s(
+            n_tokens_per_expert=safe_divide(
+                expert_region_n_tokens,
+                safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep),
+            ),
+            weight_repr=model_repr.mlp_down_exp_weight,
+        ),
         post_mlp_rs=expert_rs_time_s,
         post_mlp_a2a=a2a_time_s,
         post_mlp_residual=hbm_load_store_time_s,
         activation_send=activation_send_time_s,
     )
+    print()
     print_h2_header("TRANSFORMER BLOCK COMPONENTS")
     total_transformer_block_time_s = sum(transformer_block_time_components.values())
     for component_name, component_time_s in transformer_block_time_components.items():
