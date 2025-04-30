@@ -74,9 +74,7 @@ class ExpertMLP(Op):
 
 
 class Norm(Op):
-    def __init__(
-        self, n_tokens: int, hidden_dim: int, n_tokens_partition_degree: int
-    ) -> None:
+    def __init__(self, n_tokens: int, hidden_dim: int, n_tokens_partition_degree: int) -> None:
         self.__n_tokens = n_tokens
         self.__hidden_dim = hidden_dim
         self.__n_tokens_partition_degree = n_tokens_partition_degree

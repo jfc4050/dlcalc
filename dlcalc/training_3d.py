@@ -146,15 +146,13 @@ def main() -> None:
 
     print_h1_header("[MEMORY] TOTAL")
     print(
-        f"total mem (GiB) = {(model_repr.states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024 ** 3):.3f}GiB"
+        f"total mem (GiB) = {(model_repr.states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024**3):.3f}GiB"
     )
 
     ###################################################################################
     # PERF ANALYSIS
     ###################################################################################
-    print_h1_header(
-        "GEMMs (note numbers calculated for 100% flops+bandwidth utilization)"
-    )
+    print_h1_header("GEMMs (note numbers calculated for 100% flops+bandwidth utilization)")
     for proj_name, weight_repr in [
         ("QKV", model_repr.qkv_weight),
         ("ATTN_OUT", model_repr.attn_out_weight),
@@ -204,9 +202,7 @@ def main() -> None:
     print_h1_header("TP COMMUNICATION")
     # TODO. assumes SP, analysis pretty similar if not SP though
     activation_size = Size(
-        numel=safe_divide(sequence_len, model_repr.parallelism_cfg.cp)
-        * microbatch_sz
-        * hidden_sz,
+        numel=safe_divide(sequence_len, model_repr.parallelism_cfg.cp) * microbatch_sz * hidden_sz,
         bits_per_element=model_repr.bits_per_parameter,
     )
     print(
@@ -218,8 +214,7 @@ def main() -> None:
 
     print_h1_header("PP COMMUNICATION")
     activation_send_time_s = (
-        activation_size.bytes()
-        / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
+        activation_size.bytes() / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
     )
     print(f"PP send/recv: {activation_size}: {activation_send_time_s * 1000:.3f} ms")
 
@@ -236,10 +231,7 @@ def main() -> None:
     print(f"pipeline bubble fraction = {pipeline_bubble_fraction:.2f}")
 
     print_h1_header("DP COMMUNICATION")
-    if (
-        model_repr.parallelism_cfg.zero_level
-        != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER
-    ):
+    if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
         # TODO. we need to fix these to account for EP and CP.
@@ -368,9 +360,7 @@ def main() -> None:
     )
 
     hbm_load_store_time_s = (
-        2
-        * activation_size.bytes()
-        / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
+        2 * activation_size.bytes() / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
     )
 
     # SDPA time
@@ -378,17 +368,9 @@ def main() -> None:
     sdpa_flops = sum(
         [
             # Q @ K.T
-            2
-            * n_heads_per_tp_partition
-            * sequence_len
-            * model_repr.head_dim
-            * sequence_len,
+            2 * n_heads_per_tp_partition * sequence_len * model_repr.head_dim * sequence_len,
             # A @ V
-            2
-            * n_heads_per_tp_partition
-            * sequence_len
-            * sequence_len
-            * model_repr.head_dim,
+            2 * n_heads_per_tp_partition * sequence_len * sequence_len * model_repr.head_dim,
         ]
     )
     sdpa_time = (sdpa_flops // model_repr.parallelism_cfg.cp) / (
@@ -411,9 +393,7 @@ def main() -> None:
 
         print(f"expert capacity: {expert_capacity}")
 
-        def compute_expert_gemm_time_s(
-            n_tokens_per_expert: int, weight_repr: TensorRepr
-        ) -> float:
+        def compute_expert_gemm_time_s(n_tokens_per_expert: int, weight_repr: TensorRepr) -> float:
             n_local_experts, *gemm_dims = weight_repr.shape(partitioned=True)
             flops = n_local_experts * compute_gemm_flops(
                 n_tokens=n_tokens_per_expert,
@@ -440,9 +420,7 @@ def main() -> None:
             expert_capacity * model_repr.moe_cfg.n_experts,
             token_partition_degree_nonexp,
         )
-        print(
-            "n_tokens_per_token_partition_nonexp:", n_tokens_per_token_partition_nonexp
-        )
+        print("n_tokens_per_token_partition_nonexp:", n_tokens_per_token_partition_nonexp)
 
         # the alltoall will trade token partitioning along the capacity dimension
         # for token partitioning along the experts dimension. i.e. we'll go from:
@@ -504,18 +482,14 @@ def main() -> None:
             mlp_up_proj=compute_expert_gemm_time_s(
                 n_tokens_per_expert=safe_divide(
                     expert_region_n_tokens,
-                    safe_divide(
-                        model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep
-                    ),
+                    safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep),
                 ),
                 weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
             ),
             mlp_down_proj=compute_expert_gemm_time_s(
                 n_tokens_per_expert=safe_divide(
                     expert_region_n_tokens,
-                    safe_divide(
-                        model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep
-                    ),
+                    safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep),
                 ),
                 weight_repr=model_repr.mlp_down_exp_weight,  # type: ignore[arg-type]
             ),

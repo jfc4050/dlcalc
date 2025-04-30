@@ -54,9 +54,7 @@ def get_kubernetes_cluster_members(job_search_prefix: str) -> List[KubernetesJob
             node_az = node_info.metadata.labels["topology.kubernetes.io/zone"]
             cluster_azs.add(node_az)
 
-            node_instance_type = node_info.metadata.labels[
-                "node.kubernetes.io/instance-type"
-            ]
+            node_instance_type = node_info.metadata.labels["node.kubernetes.io/instance-type"]
             cluster_instance_types.add(node_instance_type)
 
             member_def = KubernetesJobMember(
@@ -73,9 +71,7 @@ def get_kubernetes_cluster_members(job_search_prefix: str) -> List[KubernetesJob
         raise RuntimeError(f"found {len(cluster_regions)} regions but only expected 1.")
 
     if len(cluster_instance_types) != 1:
-        print(
-            f"WARNING: found {len(cluster_instance_types)}, generally there should only be 1."
-        )
+        print(f"WARNING: found {len(cluster_instance_types)}, generally there should only be 1.")
 
     if len(cluster_members) != len(node_name_to_pod_name):
         raise RuntimeError(

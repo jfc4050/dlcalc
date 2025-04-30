@@ -46,9 +46,7 @@ def build_instance_tree(
         # update nodes
         for node_id in chain:
             if node_id not in node_id_to_node:
-                node_id_to_node[node_id] = TreeNode(
-                    node_id, parent=None, children=set()
-                )
+                node_id_to_node[node_id] = TreeNode(node_id, parent=None, children=set())
 
         # update edges
         for parent_node_idx in range(len(chain) - 1):

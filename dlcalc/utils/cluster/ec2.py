@@ -34,9 +34,7 @@ def iter_instance_info(
         },
     ]
 
-    for page in paginator.paginate(
-        Filters=instance_filters, PaginationConfig={"PageSize": 100}
-    ):
+    for page in paginator.paginate(Filters=instance_filters, PaginationConfig={"PageSize": 100}):
         for instance_info in page["Instances"]:
             if (
                 accepted_instance_ids is None

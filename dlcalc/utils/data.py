@@ -28,9 +28,7 @@ class Size:
                 f"{self._bits_per_element} vs {other._bits_per_element}"
             )
 
-        return Size(
-            numel=self._numel + other._numel, bits_per_element=self._bits_per_element
-        )
+        return Size(numel=self._numel + other._numel, bits_per_element=self._bits_per_element)
 
     def __mul__(self, multiplicand: int) -> "Size":
         return Size(self._numel * multiplicand, self._bits_per_element)
@@ -44,7 +42,7 @@ class Size:
     def __repr__(self) -> str:
         return (
             f"numel: {self._numel * 1e-9:.3f} B, "
-            f"bytes: {self._numel * safe_divide(self._bits_per_element, 8) / (1024 ** 3):.3f} GiB"
+            f"bytes: {self._numel * safe_divide(self._bits_per_element, 8) / (1024**3):.3f} GiB"
         )
 
 
@@ -87,9 +85,7 @@ class TensorRepr:
         if partitioned:
             shape = list(self._unpartitioned_shape)
             for partition_dim, partition_degree in self._partition_spec.items():
-                shape[partition_dim] = safe_divide(
-                    shape[partition_dim], partition_degree
-                )
+                shape[partition_dim] = safe_divide(shape[partition_dim], partition_degree)
             return tuple(shape)
         else:
             return self._unpartitioned_shape

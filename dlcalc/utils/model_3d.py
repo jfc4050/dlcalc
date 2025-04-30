@@ -112,7 +112,7 @@ class ModelStates:
                 f"exp_avg         : {self.opt_states.exp_avg_shard.size(partitioned=True)}",
                 f"exp_avg_squared : {self.opt_states.exp_avg_sq_shard.size(partitioned=True)}",
                 f"grad_buffer     : {self.opt_states.grad_buffer.size(partitioned=True)}",
-                f"TOTAL           : {(params_bytes + opt_states_bytes) / (1024 ** 3):.2f}GiB",
+                f"TOTAL           : {(params_bytes + opt_states_bytes) / (1024**3):.2f}GiB",
             ]
         )
 
@@ -277,10 +277,7 @@ class ThreeDParallelModel:
             bits_per_elt=self.bits_per_parameter,
         )
 
-        if (
-            self.parallelism_cfg.zero_level
-            != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER
-        ):
+        if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
             raise NotImplementedError
 
         self.states = ModelStates(
@@ -349,25 +346,16 @@ class ThreeDParallelModel:
         )
 
     def layers_per_pp_stage(self) -> int:
-        return sum(
-            self.__n_layers(mpmd_partitioned=True, moe=moe) for moe in [False, True]
-        )
+        return sum(self.__n_layers(mpmd_partitioned=True, moe=moe) for moe in [False, True])
 
     def grad_bucket_numel(self) -> int:
         return ceil_divide(self.bucket_size_bytes, self.bits_per_grad // 8)
 
-    def __get_n_total_params(
-        self, spmd_partitioned: bool, mpmd_partitioned: bool
-    ) -> int:
+    def __get_n_total_params(self, spmd_partitioned: bool, mpmd_partitioned: bool) -> int:
         return _sum(
             # we'll give the number of parameters on the most heavily loaded pipeline stage
             # if PP=1 then the only pipeline stage must store both embedding and LM head.
-            (
-                1
-                if (mpmd_partitioned and self.parallelism_cfg.pp > 1)
-                or self.tie_embeddings
-                else 2
-            )
+            (1 if (mpmd_partitioned and self.parallelism_cfg.pp > 1) or self.tie_embeddings else 2)
             * self.__get_embedding_or_lm_head_size(spmd_partitioned=spmd_partitioned),
             # add in the transformer blocks
             sum(
@@ -394,11 +382,7 @@ class ThreeDParallelModel:
         # if PP=1 then the only pipeline stage must store both embedding and LM head.
         return _sum(
             # embedding/lmhead
-            (
-                1
-                if (partitioned and self.parallelism_cfg.pp > 1) or self.tie_embeddings
-                else 2
-            )
+            (1 if (partitioned and self.parallelism_cfg.pp > 1) or self.tie_embeddings else 2)
             * self.__get_embedding_or_lm_head_size(spmd_partitioned=partitioned),
             # transformer blocks
             sum(
@@ -538,9 +522,7 @@ class ThreeDParallelModel:
                 # DOWN PROJ
                 # - output deallocated (dropout doesn't need to store)
                 # DROPOUT
-                self.__sp_partition_if_on(int(0.5 * sbh))
-                if self.dropout
-                else 0,  # dropout mask
+                self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0,  # dropout mask
                 # -  output deallocated: residual doesn't need to store
                 # RESIDUAL
                 self.__sp_partition_if_on(sbh),  # needed by norm2, resid2
@@ -554,9 +536,7 @@ class ThreeDParallelModel:
                 # MLP DOWN (row parallel linear)
                 # - output deallocated - dropout doesn't need to store
                 # DROPOUT
-                self.__sp_partition_if_on(int(0.5 * sbh))
-                if self.dropout
-                else 0,  # dropout mask
+                self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0,  # dropout mask
                 # - output deallocated - residual doesn't need to store
                 # RESIDUAL
                 # input to next norm1, resid1
@@ -636,9 +616,7 @@ class ThreeDParallelModel:
                 # DOWN PROJ
                 # - output deallocated (dropout doesn't need to store)
                 # DROPOUT
-                self.__sp_partition_if_on(int(0.5 * sbh))
-                if self.dropout
-                else 0,  # dropout mask
+                self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0,  # dropout mask
                 # -  output deallocated: residual doesn't need to store
                 # RESIDUAL
                 self.__sp_partition_if_on(sbh),  # needed by norm2, resid2
@@ -652,9 +630,7 @@ class ThreeDParallelModel:
                 # MLP DOWN (row parallel linear)
                 # - output deallocated - dropout doesn't need to store
                 # DROPOUT
-                self.__sp_partition_if_on(int(0.5 * sbh))
-                if self.dropout
-                else 0,  # dropout mask
+                self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0,  # dropout mask
                 # - output deallocated - residual doesn't need to store
                 # RESIDUAL
                 # input to next norm1, resid1

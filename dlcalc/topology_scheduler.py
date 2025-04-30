@@ -69,9 +69,7 @@ def main() -> None:
     dp_degree = args.dp_degree
     accelerators_per_node = args.accelerators_per_node
 
-    n_required_nodes = safe_divide(
-        tp_degree * pp_degree * dp_degree, accelerators_per_node
-    )
+    n_required_nodes = safe_divide(tp_degree * pp_degree * dp_degree, accelerators_per_node)
 
     free_instance_ids = dlcalc.utils.cluster.kubernetes.get_free_instances()
     print(f"found {len(free_instance_ids)} free instances")
