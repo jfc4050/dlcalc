@@ -76,8 +76,7 @@ def build_instance_tree(
 
     if len(root_nodes) != 1:
         raise RuntimeError(
-            f"expected to find 1 root node out of {len(all_nodes)} nodes "
-            f"but got {len(root_nodes)}"
+            f"expected to find 1 root node out of {len(all_nodes)} nodes but got {len(root_nodes)}"
         )
     for node in nonroot_nodes:
         assert node.parent in all_nodes

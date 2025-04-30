@@ -171,7 +171,7 @@ def main() -> None:
         )
         print(
             f"\tCOMPUTE: {flops * 1e-12:.2f} TFLOPs -> "
-            f"{flops/machine_spec.device_spec.peak_flops * 1000:.3f} ms"
+            f"{flops / machine_spec.device_spec.peak_flops * 1000:.3f} ms"
         )
         bytes_per_element = model_repr.bits_per_parameter // 8
         gemm_input_dim, gemm_output_dim = weight_repr.shape(partitioned=True)

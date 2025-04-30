@@ -9,8 +9,7 @@ def safe_divide(numerator: int, denominator: int) -> int:
             if numerator % candidate_denominator == 0:
                 valid_denominators.append(candidate_denominator)
         raise ValueError(
-            f"{numerator} not divisible by {denominator}. "
-            f"valid denominators: {valid_denominators}"
+            f"{numerator} not divisible by {denominator}. valid denominators: {valid_denominators}"
         )
 
     return numerator // denominator
