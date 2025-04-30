@@ -2,6 +2,6 @@
 
 set -e
 
-ruff format --check .
+ruff format --diff .
 ruff check --output-format=github .
 mypy dlcalc/training_3d.py
