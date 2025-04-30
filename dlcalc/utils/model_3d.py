@@ -235,21 +235,37 @@ class ThreeDParallelModel:
             partition_spec={0: self.parallelism_cfg.tp},  # row parallel
             bits_per_elt=self.bits_per_parameter,
         )
-        self.mlp_up_exp_weight = TensorRepr(
-            # following common practice of merging up + gate matmuls in the event
-            # we're using GLU.
-            unpartitioned_shape=(
-                n_experts,
-                self.hidden_sz,
-                (self.moe_cfg.expert_inter_sz * 2) if self.glu else self.moe_cfg.expert_inter_sz,
-            ),
-            partition_spec={0: self.parallelism_cfg.ep, 2: self.parallelism_cfg.tp},  # col parallel
-            bits_per_elt=self.bits_per_parameter,
+        self.mlp_up_exp_weight = (
+            TensorRepr(
+                # following common practice of merging up + gate matmuls in the event
+                # we're using GLU.
+                unpartitioned_shape=(
+                    n_experts,
+                    self.hidden_sz,
+                    (self.moe_cfg.expert_inter_sz * 2)
+                    if self.glu
+                    else self.moe_cfg.expert_inter_sz,
+                ),
+                partition_spec={
+                    0: self.parallelism_cfg.ep,
+                    2: self.parallelism_cfg.tp,
+                },  # col parallel
+                bits_per_elt=self.bits_per_parameter,
+            )
+            if self.moe_cfg is not None
+            else None
         )
-        self.mlp_down_exp_weight = TensorRepr(
-            unpartitioned_shape=(n_experts, self.moe_cfg.expert_inter_sz, self.hidden_sz),
-            partition_spec={0: self.parallelism_cfg.ep, 1: self.parallelism_cfg.tp},  # row parallel
-            bits_per_elt=self.bits_per_parameter,
+        self.mlp_down_exp_weight = (
+            TensorRepr(
+                unpartitioned_shape=(n_experts, self.moe_cfg.expert_inter_sz, self.hidden_sz),
+                partition_spec={
+                    0: self.parallelism_cfg.ep,
+                    1: self.parallelism_cfg.tp,
+                },  # row parallel
+                bits_per_elt=self.bits_per_parameter,
+            )
+            if self.moe_cfg is not None
+            else None
         )
         self.pre_mlp_norm_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz,),
@@ -346,7 +362,8 @@ class ThreeDParallelModel:
                     active=False,
                     experts_per_token=None,
                 )
-                for moe in [False, True]
+                # TODO. clean this up
+                for moe in ([False, True] if self.moe_cfg is not None else [False])
             ),
         )
 
@@ -389,12 +406,8 @@ class ThreeDParallelModel:
     ) -> int:
         assert active == (experts_per_token is not None)
 
-        return _sum(
-            self.pre_attn_norm_weight.numel(partitioned=spmd_partitioned),
-            self.qkv_weight.numel(partitioned=spmd_partitioned),
-            self.attn_out_weight.numel(partitioned=spmd_partitioned),
-            self.pre_mlp_norm_weight.numel(partitioned=spmd_partitioned),
-            (
+        if moe:
+            mlp_params = (
                 # if we're trying to compute active params, then we account for the
                 # fact that we'll apply topk mlps per token.
                 experts_per_token  # type: ignore[operator]
@@ -410,11 +423,18 @@ class ThreeDParallelModel:
                     self.mlp_down_exp_weight.numel(partitioned=spmd_partitioned),
                 )
             )
-            if moe
-            else _sum(
+        else:
+            mlp_params = _sum(
                 self.mlp_up_weight.numel(partitioned=spmd_partitioned),
                 self.mlp_down_weight.numel(partitioned=spmd_partitioned),
-            ),
+            )
+
+        return _sum(
+            self.pre_attn_norm_weight.numel(partitioned=spmd_partitioned),
+            self.qkv_weight.numel(partitioned=spmd_partitioned),
+            self.attn_out_weight.numel(partitioned=spmd_partitioned),
+            self.pre_mlp_norm_weight.numel(partitioned=spmd_partitioned),
+            mlp_params,
         )
 
     def __n_layers(self, mpmd_partitioned: bool, moe: bool) -> int:
