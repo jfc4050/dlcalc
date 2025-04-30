@@ -399,8 +399,10 @@ class ThreeDParallelModel:
                 # fact that we'll apply topk mlps per token.
                 experts_per_token  # type: ignore[operator]
                 * _sum(
-                    self.mlp_up_exp_weight.numel(partitioned=spmd_partitioned) // self.moe_cfg.n_experts,
-                    self.mlp_down_exp_weight.numel(partitioned=spmd_partitioned) // self.moe_cfg.n_experts,
+                    self.mlp_up_exp_weight.numel(partitioned=spmd_partitioned)
+                    // self.moe_cfg.n_experts,
+                    self.mlp_down_exp_weight.numel(partitioned=spmd_partitioned)
+                    // self.moe_cfg.n_experts,
                 )
                 if active
                 else _sum(
@@ -435,9 +437,6 @@ class ThreeDParallelModel:
         sbq = self.sequence_len * self.microbatch_sz * self.n_q_heads * self.head_dim
         sbk = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
         sbv = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
-
-        capacity = None
-        n_tokens = None
 
         if self.act_ckpting_type == ActivationCheckpointingType.FULL:
             return self.__sp_partition_if_on(sbh)  # just the block input

@@ -341,7 +341,7 @@ def main() -> None:
     print_h1_header("ITERATION TIME (IN PROGRESS - DON'T TRUST ME)")
     n_tokens = model_repr.microbatch_sz * model_repr.sequence_len
 
-    def compute_gemm_time_s(weight_repr: TensorRepr) -> int:
+    def compute_gemm_time_s(weight_repr: TensorRepr) -> float:
         flops = compute_gemm_flops(
             n_tokens=safe_divide(n_tokens, model_repr.parallelism_cfg.cp),
             weight_shape=weight_repr.shape(partitioned=True),
@@ -359,22 +359,28 @@ def main() -> None:
         machine_spec=machine_spec,
     )
 
+    assert model_repr.moe_cfg is not None  # TODO. fix for non-MoE
+
     # this is the total (i.e. unpartitioned) number of tokens received by each expert
     # note: this is done per "global microbatch" which means that in addition to token
     # partitioning parallelism impacting routing decisions, microbatching does as well.
     expert_capacity = (
-        (model_repr.microbatch_sz * model_repr.parallelism_cfg.dp)
-        * model_repr.sequence_len
-        * model_repr.moe_cfg.experts_per_token  # or k in other words
-        * model_repr.moe_cfg.capacity_factor
-    ) // model_repr.moe_cfg.n_experts
+        int(
+            (model_repr.microbatch_sz * model_repr.parallelism_cfg.dp)
+            * model_repr.sequence_len
+            * model_repr.moe_cfg.experts_per_token  # or k in other words
+            * model_repr.moe_cfg.capacity_factor
+        )
+        // model_repr.moe_cfg.n_experts
+    )
+
     print(f"expert capacity: {expert_capacity}")
 
-    def compute_expert_gemm_time_s(n_tokens_per_expert: int, weight_repr: TensorRepr) -> int:
+    def compute_expert_gemm_time_s(n_tokens_per_expert: int, weight_repr: TensorRepr) -> float:
         n_local_experts, *gemm_dims = weight_repr.shape(partitioned=True)
         flops = n_local_experts * compute_gemm_flops(
             n_tokens=n_tokens_per_expert,
-            weight_shape=gemm_dims,
+            weight_shape=tuple(gemm_dims),
         )
         return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
