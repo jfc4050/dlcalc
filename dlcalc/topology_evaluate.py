@@ -90,7 +90,9 @@ def main() -> None:
             f"expected to find {expected_n_nodes} nodes "
             f"but found {len(cluster_members)}"
         )
-    worker_id_to_instance_id = {m.worker_id: m.node_instance_id for m in cluster_members}
+    worker_id_to_instance_id = {
+        m.worker_id: m.node_instance_id for m in cluster_members
+    }
     (cluster_region,) = {m.node_region for m in cluster_members}
     cluster_instance_types = {m.node_instance_type for m in cluster_members}
     cluster_azs = {m.node_az for m in cluster_members}

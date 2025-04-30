@@ -34,7 +34,9 @@ def main() -> None:
     goodput = args.goodput
 
     if not 0.0 <= goodput <= 1.0:
-        raise ValueError(f"goodput expected to be in range [0.0, 1.0] but got {goodput}")
+        raise ValueError(
+            f"goodput expected to be in range [0.0, 1.0] but got {goodput}"
+        )
 
     tokens_per_day = samples_per_sec * tokens_per_sample * 60 * 60 * 24 * goodput
 

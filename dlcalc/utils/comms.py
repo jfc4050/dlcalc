@@ -180,7 +180,8 @@ def get_all_to_all_comm_time_s(
 
     # we'll just model it as simultaneous sends of partition to all other participants.
     bw_term_s = ((size.bytes() // n_participants) * (n_participants - 1)) / (
-        machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / mp_degree_in_node
+        machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
+        / mp_degree_in_node
     )
 
     return lat_term_s + bw_term_s
