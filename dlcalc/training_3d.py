@@ -445,19 +445,18 @@ def main() -> None:
             n_tokens_per_token_partition_exp * model_repr.moe_cfg.expert_tp_degree
         )
 
+        expert_activation_size = Size(
+            numel=expert_region_n_tokens * model_repr.hidden_sz,
+            bits_per_element=model_repr.bits_per_parameter,
+        )
+
         expert_ag_time_s = get_tp_all_gather_comm_time_s(
-            size=Size(
-                numel=expert_region_n_tokens * model_repr.hidden_sz,
-                bits_per_element=model_repr.bits_per_parameter,
-            ),
+            size=expert_activation_size,
             n_participants=model_repr.moe_cfg.expert_tp_degree,
             machine_spec=machine_spec,
         )
         expert_rs_time_s = get_tp_reduce_scatter_comm_time_s(
-            size=Size(
-                expert_region_n_tokens * model_repr.hidden_sz,
-                bits_per_element=model_repr.bits_per_parameter,
-            ),
+            size=expert_activation_size,
             n_participants=model_repr.moe_cfg.expert_tp_degree,
             machine_spec=machine_spec,
         )
@@ -486,6 +485,7 @@ def main() -> None:
                 ),
                 weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
             ),
+            # TODO. GLU Activation
             mlp_down_proj=compute_expert_gemm_time_s(
                 n_tokens_per_expert=safe_divide(
                     expert_region_n_tokens,
