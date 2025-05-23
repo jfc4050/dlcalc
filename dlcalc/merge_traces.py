@@ -23,7 +23,7 @@ def main() -> None:
     trace_paths = args.trace_paths
     out_path = args.output
 
-    merged_trace = None
+    merged_trace: dict = None  # type: ignore
     for idx, trace_path in enumerate(trace_paths):
         with open(trace_path) as f:
             trace = json.load(f)
