@@ -27,6 +27,19 @@ def filter_events(trace: dict) -> dict:
     return trace
 
 
+def drop_python_stacktraces(trace: dict) -> dict:
+    updated_events = []
+    for event in trace["traceEvents"]:
+        event: dict
+        if event.get("cat") == "python_function":
+            continue
+        updated_events.append(event)
+
+    trace["traceEvents"] = updated_events
+
+    return trace
+
+
 def move_to_reasonable_streams(trace: dict) -> dict:
     # flow events need to be tracked separately
     correlation_id_to_new_tid = {}
