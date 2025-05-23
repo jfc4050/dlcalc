@@ -40,6 +40,59 @@ def drop_python_stacktraces(trace: dict) -> dict:
     return trace
 
 
+def update_pid_with_rank(trace: dict, new_rank: int) -> dict:
+    correlation_id_to_new_pid = {}
+
+    updated_events = []
+    for event in trace["traceEvents"]:
+        event: dict
+        if event.get("cat") == "kernel":
+            event["pid"] = new_rank
+
+            correlation_id: int = event["args"]["correlation"]
+            correlation_id_to_new_pid[correlation_id] = new_rank
+
+        elif event.get("cat") == "gpu_user_annotation":
+            event_name: str = event["name"]
+            if event_name.startswith(
+                (
+                    "nccl:all_gather",
+                    "nccl:reduce_scatter",
+                    "nccl:_all_gather",
+                    "nccl:_reduce_scatter",
+                    "nccl:send",
+                    "nccl:recv",
+                )
+            ):
+                event["pid"] = new_rank
+
+        elif event.get("cat") in ("gpu_memcpy", "gpu_memset"):
+            event["pid"] = new_rank
+
+            correlation_id: int = event["args"]["correlation"]
+            correlation_id_to_new_pid[correlation_id] = new_rank
+
+        updated_events.append(event)
+
+    trace["traceEvents"] = updated_events
+
+    updated_events = []
+    for event in trace["traceEvents"]:
+        event: dict
+
+        if event.get("cat") == "ac2g":
+            correlation_id: int = event["id"]
+            if event.get("bp") == "e":
+                if correlation_id in correlation_id_to_new_pid:
+                    event["pid"] = correlation_id_to_new_pid[correlation_id]
+
+        updated_events.append(event)
+
+    trace["traceEvents"] = updated_events
+
+    return trace
+
+
 def move_to_reasonable_streams(trace: dict) -> dict:
     # flow events need to be tracked separately
     correlation_id_to_new_tid = {}
