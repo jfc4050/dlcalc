@@ -39,7 +39,7 @@ def main() -> None:
     trace = traces.move_to_reasonable_streams(trace)
 
     with open(out_path, "w") as f:
-        json.dump(trace, f, indent=2)
+        json.dump(trace, f)
 
 
 if __name__ == "__main__":
