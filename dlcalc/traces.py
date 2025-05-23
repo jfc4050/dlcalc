@@ -53,18 +53,7 @@ def update_pid_with_rank(trace: dict, new_rank: int) -> dict:
             correlation_id_to_new_pid[correlation_id] = new_rank
 
         elif event.get("cat") == "gpu_user_annotation":
-            event_name: str = event["name"]
-            if event_name.startswith(
-                (
-                    "nccl:all_gather",
-                    "nccl:reduce_scatter",
-                    "nccl:_all_gather",
-                    "nccl:_reduce_scatter",
-                    "nccl:send",
-                    "nccl:recv",
-                )
-            ):
-                event["pid"] = new_rank
+            event["pid"] = new_rank
 
         elif event.get("cat") in ("gpu_memcpy", "gpu_memset"):
             event["pid"] = new_rank
@@ -107,7 +96,7 @@ def move_to_reasonable_streams(trace: dict) -> dict:
             new_tid = COMPUTE_TID
             event_name: str = event["name"]
             correlation_id: int = event["args"]["correlation"]
-            if event_name.startswith(("ncclDevKernel_AllGather", "ncclDevKernel_ReduceScatter")):
+            if event_name.startswith(("ncclDevKernel_AllGather", "ncclDevKernel_ReduceScatter", "ncclDevKernel_AllReduce")):
                 new_tid = TP_COMM_TID
             elif event_name.startswith("ncclDevKernel_SendRecv"):
                 new_tid = SEND_RECV_TID
@@ -124,6 +113,7 @@ def move_to_reasonable_streams(trace: dict) -> dict:
                     "nccl:reduce_scatter",
                     "nccl:_all_gather",
                     "nccl:_reduce_scatter",
+                    "nccl:all_reduce",
                 )
             ):
                 new_tid = TP_COMM_TID
