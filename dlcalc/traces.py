@@ -40,7 +40,9 @@ def drop_python_stacktraces(trace: dict) -> dict:
     return trace
 
 
-def update_pid_with_rank(trace: dict, new_rank: int) -> dict:
+def update_pid_with_rank(trace: dict) -> dict:
+    new_rank = trace["distributedInfo"]["rank"]
+
     correlation_id_to_new_pid = {}
 
     updated_events = []

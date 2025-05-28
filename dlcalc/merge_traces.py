@@ -24,13 +24,13 @@ def main() -> None:
     out_path = args.output
 
     merged_trace: dict = None  # type: ignore
-    for idx, trace_path in enumerate(trace_paths):
+    for trace_path in trace_paths:
         with open(trace_path) as f:
             trace = json.load(f)
 
         trace = traces.filter_events(trace)
         trace = traces.drop_python_stacktraces(trace)
-        trace = traces.update_pid_with_rank(trace, new_rank=idx)
+        trace = traces.update_pid_with_rank(trace)
         trace = traces.move_to_reasonable_streams(trace)
 
         if merged_trace is None:
