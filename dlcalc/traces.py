@@ -98,7 +98,13 @@ def move_to_reasonable_streams(trace: dict) -> dict:
             new_tid = COMPUTE_TID
             event_name: str = event["name"]
             correlation_id: int = event["args"]["correlation"]
-            if event_name.startswith(("ncclDevKernel_AllGather", "ncclDevKernel_ReduceScatter", "ncclDevKernel_AllReduce")):
+            if event_name.startswith(
+                (
+                    "ncclDevKernel_AllGather",
+                    "ncclDevKernel_ReduceScatter",
+                    "ncclDevKernel_AllReduce",
+                )
+            ):
                 new_tid = TP_COMM_TID
             elif event_name.startswith("ncclDevKernel_SendRecv"):
                 new_tid = SEND_RECV_TID
