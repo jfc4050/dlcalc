@@ -101,6 +101,38 @@ class MachineSpec:
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
+            "b300": MachineSpec(
+                n_devices=8,
+                device_spec=DeviceSpec(
+                    peak_flops=int(2250e12),  # (ignore sparsity numbers)
+                    mem_bandwidth_bytes_per_sec=int(3350e9),  # TODO.
+                    mem_capacity_bytes=288 * (1024**3),
+                ),
+                intra_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(900e9),
+                    latency_sec=3e-6,
+                ),
+                inter_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(800e9),
+                    latency_sec=EFA_LATENCY_S,
+                ),
+            ),
+            "gb300": MachineSpec(
+                n_devices=72,
+                device_spec=DeviceSpec(
+                    peak_flops=int(2500e12),  # (ignore sparsity numbers)
+                    mem_bandwidth_bytes_per_sec=int(3350e9),  # TODO.
+                    mem_capacity_bytes=288 * (1024**3),
+                ),
+                intra_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(900e9),
+                    latency_sec=3e-6,
+                ),
+                inter_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(800e9),
+                    latency_sec=EFA_LATENCY_S,
+                ),
+            ),
             # https://aws.amazon.com/ec2/instance-types/trn1/
             # https://awsdocs-neuron.readthedocs-hosted.com/en/latest/general/arch/neuron-hardware/trn1-arch.html
             "trn1n.32xlarge": MachineSpec(
