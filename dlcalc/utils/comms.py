@@ -179,8 +179,12 @@ def get_all_to_all_comm_time_s(
     lat_term_s = machine_spec.inter_node_connect.latency_sec
 
     # we'll just model it as simultaneous sends of partition to all other participants.
-    bw_term_s = ((size.bytes() // n_participants) * (n_participants - 1)) / (
-        machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / mp_degree_in_node
+    bw = (
+        (machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / mp_degree_in_node)
+        if n_participants > 8
+        else machine_spec.intra_node_connect.unidirectional_bw_bytes_per_sec
     )
+
+    bw_term_s = ((size.bytes() // n_participants) * (n_participants - 1)) / bw
 
     return lat_term_s + bw_term_s

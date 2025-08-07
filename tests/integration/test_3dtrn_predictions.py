@@ -76,11 +76,42 @@ class TestMFUPredictions:
             f"Difference: {difference:.2f}%"
         )
     
+    def test_gpt_oss_120b_mfu(self):
+        """Test that GPT OSS 120B MoE configuration predicts ~19.90% MFU."""
+        config_file = "examples/gpt_oss_120b.yaml"
+        
+        # Skip if config file doesn't exist
+        if not Path(config_file).exists():
+            pytest.skip(f"Config file {config_file} not found")
+        
+        # Run 3dtrn and get MFU
+        actual_mfu, output = run_3dtrn(config_file)
+        
+        # Check that we got an MFU value
+        assert actual_mfu is not None, f"Could not find MFU in output:\n{output[-1000:]}"
+        
+        # Expected value with tolerance
+        expected_mfu = 19.90
+        tolerance = 0.5  # Allow 0.5% difference
+        
+        # Check if within tolerance
+        difference = abs(actual_mfu - expected_mfu)
+        assert difference <= tolerance, (
+            f"MFU prediction {actual_mfu}% is outside tolerance. "
+            f"Expected: {expected_mfu}% ± {tolerance}%, "
+            f"Difference: {difference:.2f}%"
+        )
+        
+        # Check that output mentions MoE since this is an MoE model
+        assert "MoE" in output or "expert" in output.lower(), \
+            "Output should mention MoE configuration"
+    
     def test_multiple_configs(self):
         """Test MFU predictions for multiple configurations if available."""
         # Define test cases: (config_file, expected_mfu, tolerance)
         test_cases = [
             ("examples/llama3_70b.yaml", 30.22, 0.5),
+            ("examples/gpt_oss_120b.yaml", 19.90, 0.5),
             # Add more test cases as needed
             # ("examples/llama3_8b.yaml", 45.0, 1.0),
         ]
