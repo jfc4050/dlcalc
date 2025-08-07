@@ -13,49 +13,51 @@ TODO. try to get estimates closer by accounting for NCCL protocols https://githu
 
 from .data import Size
 from .hardware import MachineSpec
+from .model_3d import ParallelConfig
 
 
 def get_tp_reduce_scatter_comm_time_s(
-    size: Size, n_participants: int, machine_spec: MachineSpec
+    size: Size, parallel_config: ParallelConfig, machine_spec: MachineSpec
 ) -> float:
     """assumes ring algorithm."""
     return _get_ring_tp_ag_or_rs_comm_time_s(
-        size, n_participants=n_participants, machine_spec=machine_spec
+        size, n_participants=parallel_config.tp, machine_spec=machine_spec
     )
 
 
 def get_tp_all_gather_comm_time_s(
-    size: Size, n_participants: int, machine_spec: MachineSpec
+    size: Size, parallel_config: ParallelConfig, machine_spec: MachineSpec
 ) -> float:
     """assumes ring algorithm."""
     return _get_ring_tp_ag_or_rs_comm_time_s(
-        size, n_participants=n_participants, machine_spec=machine_spec
+        size, n_participants=parallel_config.tp, machine_spec=machine_spec
     )
 
 
 def get_dp_reduce_scatter_latency_term_s(
-    n_participants: int,
+    parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
     return _ring_ag_or_rs_latency_term_s(
-        n_participants=n_participants,
+        n_participants=parallel_config.dp,
         link_latency_s=machine_spec.inter_node_connect.latency_sec,
     )
 
 
 def get_dp_reduce_scatter_bw_term_s(
     size: Size,
-    n_participants: int,
-    mp_degree_in_node: int,
+    parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
+    # full BW should be divided along all MP ranks within a single node, since
+    # they are each participating in their own DP collectives.
+    # We assume TP is the only form of MP we do within node.
+    mp_degree_in_node = parallel_config.tp
     return _ring_ag_or_rs_bw_term_s(
         size,
-        n_participants=n_participants,
-        # full BW should be divided along all MP ranks within a single node, since
-        # they are each participating in their own DP collectives.
+        n_participants=parallel_config.dp,
         unidirectional_link_bw_bytes_per_sec=machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
         // mp_degree_in_node,
     )
@@ -63,20 +65,18 @@ def get_dp_reduce_scatter_bw_term_s(
 
 def get_dp_reduce_scatter_comm_time_s(
     size: Size,
-    n_participants: int,
-    mp_degree_in_node: int,
+    parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
     latency_term = get_dp_reduce_scatter_latency_term_s(
-        n_participants=n_participants,
+        parallel_config=parallel_config,
         machine_spec=machine_spec,
     )
 
     bw_term = get_dp_reduce_scatter_bw_term_s(
         size,
-        n_participants=n_participants,
-        mp_degree_in_node=mp_degree_in_node,
+        parallel_config=parallel_config,
         machine_spec=machine_spec,
     )
 
@@ -84,28 +84,29 @@ def get_dp_reduce_scatter_comm_time_s(
 
 
 def get_dp_all_gather_latency_term_s(
-    n_participants: int,
+    parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
     return _ring_ag_or_rs_latency_term_s(
-        n_participants=n_participants,
+        n_participants=parallel_config.dp,
         link_latency_s=machine_spec.inter_node_connect.latency_sec,
     )
 
 
 def get_dp_all_gather_bw_term_s(
     size: Size,
-    n_participants: int,
-    mp_degree_in_node: int,
+    parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
+    # full BW should be divided along all MP ranks within a single node, since
+    # they are each participating in their own DP collectives.
+    # We assume TP is the only form of MP we do within node.
+    mp_degree_in_node = parallel_config.tp
     return _ring_ag_or_rs_bw_term_s(
         size,
-        n_participants=n_participants,
-        # full BW should be divided along all MP ranks within a single node, since
-        # they are each participating in their own DP collectives.
+        n_participants=parallel_config.dp,
         unidirectional_link_bw_bytes_per_sec=machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
         // mp_degree_in_node,
     )
@@ -113,20 +114,18 @@ def get_dp_all_gather_bw_term_s(
 
 def get_dp_all_gather_comm_time_s(
     size: Size,
-    n_participants: int,
-    mp_degree_in_node: int,
+    parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
-    latency_term = get_dp_reduce_scatter_latency_term_s(
-        n_participants=n_participants,
+    latency_term = get_dp_all_gather_latency_term_s(
+        parallel_config=parallel_config,
         machine_spec=machine_spec,
     )
 
-    bw_term = get_dp_reduce_scatter_bw_term_s(
+    bw_term = get_dp_all_gather_bw_term_s(
         size,
-        n_participants=n_participants,
-        mp_degree_in_node=mp_degree_in_node,
+        parallel_config=parallel_config,
         machine_spec=machine_spec,
     )
 
@@ -172,10 +171,13 @@ def _get_ring_tp_ag_or_rs_comm_time_s(
 
 def get_all_to_all_comm_time_s(
     size: Size,
-    n_participants: int,
-    mp_degree_in_node: int,
+    parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
 ) -> float:
+    # For all-to-all in MoE context, participants are expert parallel ranks
+    n_participants = parallel_config.expert_mesh.ep if parallel_config.expert_mesh else 1
+    mp_degree_in_node = parallel_config.tp
+
     lat_term_s = machine_spec.inter_node_connect.latency_sec
 
     # we'll just model it as simultaneous sends of partition to all other participants.
@@ -188,3 +190,29 @@ def get_all_to_all_comm_time_s(
     bw_term_s = ((size.bytes() // n_participants) * (n_participants - 1)) / bw
 
     return lat_term_s + bw_term_s
+
+
+def get_expert_tp_all_gather_comm_time_s(
+    size: Size,
+    parallel_config: ParallelConfig,
+    machine_spec: MachineSpec,
+) -> float:
+    """All-gather for expert tensor parallelism. Uses expert_tp degree."""
+    if not parallel_config.expert_mesh:
+        return 0.0
+    return _get_ring_tp_ag_or_rs_comm_time_s(
+        size, n_participants=parallel_config.expert_mesh.tp, machine_spec=machine_spec
+    )
+
+
+def get_expert_tp_reduce_scatter_comm_time_s(
+    size: Size,
+    parallel_config: ParallelConfig,
+    machine_spec: MachineSpec,
+) -> float:
+    """Reduce-scatter for expert tensor parallelism. Uses expert_tp degree."""
+    if not parallel_config.expert_mesh:
+        return 0.0
+    return _get_ring_tp_ag_or_rs_comm_time_s(
+        size, n_participants=parallel_config.expert_mesh.tp, machine_spec=machine_spec
+    )

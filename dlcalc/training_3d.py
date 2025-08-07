@@ -1,6 +1,5 @@
 """CLI tool for estimating performance characteristics of 3D parallel training."""
 
-import copy
 import json
 import math
 from argparse import ArgumentParser
@@ -16,6 +15,8 @@ from dlcalc.utils.comms import (
     get_dp_reduce_scatter_bw_term_s,
     get_dp_reduce_scatter_comm_time_s,
     get_dp_reduce_scatter_latency_term_s,
+    get_expert_tp_all_gather_comm_time_s,
+    get_expert_tp_reduce_scatter_comm_time_s,
     get_tp_all_gather_comm_time_s,
     get_tp_reduce_scatter_comm_time_s,
 )
@@ -248,10 +249,10 @@ def main() -> None:
         bits_per_element=model_repr.bits_per_parameter,
     )
     print(
-        f"TP all-gather: {activation_size}: {get_tp_all_gather_comm_time_s(size=activation_size, n_participants=model_repr.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
+        f"TP all-gather: {activation_size}: {get_tp_all_gather_comm_time_s(size=activation_size, parallel_config=model_repr.parallelism_cfg, machine_spec=machine_spec) * 1000:.3f} ms"
     )
     print(
-        f"TP reduce-scatter: {activation_size}: {get_tp_reduce_scatter_comm_time_s(size=activation_size, n_participants=model_repr.parallelism_cfg.tp, machine_spec=machine_spec) * 1000:.3f} ms"
+        f"TP reduce-scatter: {activation_size}: {get_tp_reduce_scatter_comm_time_s(size=activation_size, parallel_config=model_repr.parallelism_cfg, machine_spec=machine_spec) * 1000:.3f} ms"
     )
 
     print_h1_header("PP COMMUNICATION")
@@ -322,21 +323,18 @@ def main() -> None:
         # full BW should be divided along all MP ranks within a single node, since
         # they are each participating in their own DP collectives. We make the
         # assumption here that TP is the only form of MP we do within node.
-        mp_degree_in_node = model_repr.parallelism_cfg.tp
         grad_bucket_reduce_scatter_lat_term_s = get_dp_reduce_scatter_latency_term_s(
-            model_repr.parallelism_cfg.dp,
+            parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
         grad_bucket_reduce_scatter_bw_term_s = get_dp_reduce_scatter_bw_term_s(
             grad_bucket_size,
-            n_participants=model_repr.parallelism_cfg.dp,
-            mp_degree_in_node=mp_degree_in_node,
+            parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
         grad_bucket_reduce_scatter_time_s = get_dp_reduce_scatter_comm_time_s(
             size=grad_bucket_size,
-            n_participants=model_repr.parallelism_cfg.dp,
-            mp_degree_in_node=mp_degree_in_node,
+            parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
         print(
@@ -346,19 +344,17 @@ def main() -> None:
             f"\tTOTAL = {grad_bucket_reduce_scatter_time_s * 1000:.3f} ms\n"
         )
         param_bucket_all_gather_lat_term_s = get_dp_all_gather_latency_term_s(
-            model_repr.parallelism_cfg.dp,
+            parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
         param_bucket_all_gather_bw_term_s = get_dp_all_gather_bw_term_s(
             param_bucket_size,
-            n_participants=model_repr.parallelism_cfg.dp,
-            mp_degree_in_node=mp_degree_in_node,
+            parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
         param_bucket_all_gather_time_s = get_dp_all_gather_comm_time_s(
             param_bucket_size,
-            n_participants=model_repr.parallelism_cfg.dp,
-            mp_degree_in_node=mp_degree_in_node,
+            parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
         print(
@@ -392,12 +388,12 @@ def main() -> None:
 
     ag_time_s = get_tp_all_gather_comm_time_s(
         size=activation_size,
-        n_participants=model_repr.parallelism_cfg.tp,
+        parallel_config=model_repr.parallelism_cfg,
         machine_spec=machine_spec,
     )
     rs_time_s = get_tp_reduce_scatter_comm_time_s(
         size=activation_size,
-        n_participants=model_repr.parallelism_cfg.tp,
+        parallel_config=model_repr.parallelism_cfg,
         machine_spec=machine_spec,
     )
 
@@ -474,8 +470,7 @@ def main() -> None:
                 n_tokens_per_token_partition_nonexp * hidden_sz,
                 bits_per_element=model_repr.bits_per_parameter,
             ),
-            n_participants=model_repr.parallelism_cfg.expert_mesh.ep,
-            mp_degree_in_node=mp_degree_in_node,
+            parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
 
@@ -496,14 +491,14 @@ def main() -> None:
             bits_per_element=model_repr.bits_per_parameter,
         )
 
-        expert_ag_time_s = get_tp_all_gather_comm_time_s(
+        expert_ag_time_s = get_expert_tp_all_gather_comm_time_s(
             size=expert_activation_size,
-            n_participants=model_repr.moe_cfg.expert_tp_degree,
+            parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
-        expert_rs_time_s = get_tp_reduce_scatter_comm_time_s(
+        expert_rs_time_s = get_expert_tp_reduce_scatter_comm_time_s(
             size=expert_activation_size,
-            n_participants=model_repr.moe_cfg.expert_tp_degree,
+            parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
 
