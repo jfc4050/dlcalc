@@ -44,13 +44,26 @@ def main() -> None:
     microbatch_sz = cfg["data"]["microbatch_sz"]
     hidden_sz = cfg["model"]["hidden_sz"]
 
+    # Setup expert parallelism configuration if MoE is enabled
+    expert_mesh = None
+    if "moe" in cfg["model"]:
+        ep = cfg["parallelism"]["ep"]
+        expert_tp = cfg["model"]["moe"]["expert_tp_degree"]
+        # Calculate expert_dp from the constraint
+        tp = cfg["parallelism"]["tp"]
+        cp = cfg["parallelism"].get("cp", 1)
+        dp = cfg["parallelism"]["dp"]
+        expert_dp = safe_divide(dp * cp * tp, ep * expert_tp)
+        expert_mesh = ParallelConfig.ExpertParallelCfg(ep=ep, tp=expert_tp, dp=expert_dp)
+        print("expert mesh:", expert_mesh)
+
     model_repr = ThreeDParallelModel(
         parallelism_cfg=ParallelConfig(
             tp=cfg["parallelism"]["tp"],
             cp=cfg["parallelism"].get("cp", 1),
-            ep=cfg["parallelism"].get("ep", 1),
             pp=cfg["parallelism"]["pp"],
             dp=cfg["parallelism"]["dp"],
+            expert_mesh=expert_mesh,
             vpp=cfg["parallelism"]["vpp"],
             sp_enabled=cfg["parallelism"]["sp"],
             zero_level=ParallelConfig.ZeroLevel(cfg["parallelism"]["zero_level"]),
@@ -378,6 +391,8 @@ def main() -> None:
     )
 
     if model_repr.moe_cfg is not None:
+        assert model_repr.parallelism_cfg.expert_mesh is not None
+
         # this is the total (i.e. unpartitioned) number of tokens received by each expert
         # note: this is done per "global microbatch" which means that in addition to token
         # partitioning parallelism impacting routing decisions, microbatching does as well.
@@ -412,8 +427,7 @@ def main() -> None:
         # so we have less token partitioning in the expert region.
         # token_partition_degree_exp * EP = token_partition_degree_nonexp
         token_partition_degree_exp = safe_divide(
-            token_partition_degree_nonexp,
-            model_repr.parallelism_cfg.ep,
+            token_partition_degree_nonexp, model_repr.parallelism_cfg.expert_mesh.ep
         )
 
         n_tokens_per_token_partition_nonexp = safe_divide(
@@ -431,14 +445,17 @@ def main() -> None:
                 n_tokens_per_token_partition_nonexp * hidden_sz,
                 bits_per_element=model_repr.bits_per_parameter,
             ),
-            n_participants=model_repr.parallelism_cfg.ep,
+            n_participants=model_repr.parallelism_cfg.expert_mesh.ep,
             mp_degree_in_node=mp_degree_in_node,
             machine_spec=machine_spec,
         )
 
         n_tokens_per_token_partition_exp = safe_divide(
             expert_capacity
-            * safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep),
+            * safe_divide(
+                model_repr.moe_cfg.n_experts,
+                model_repr.parallelism_cfg.expert_mesh.ep,
+            ),
             token_partition_degree_exp,
         )
         expert_region_n_tokens = (
@@ -481,7 +498,10 @@ def main() -> None:
             mlp_up_proj=compute_expert_gemm_time_s(
                 n_tokens_per_expert=safe_divide(
                     expert_region_n_tokens,
-                    safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep),
+                    safe_divide(
+                        model_repr.moe_cfg.n_experts,
+                        model_repr.parallelism_cfg.expert_mesh.ep,
+                    ),
                 ),
                 weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
             ),
@@ -489,7 +509,10 @@ def main() -> None:
             mlp_down_proj=compute_expert_gemm_time_s(
                 n_tokens_per_expert=safe_divide(
                     expert_region_n_tokens,
-                    safe_divide(model_repr.moe_cfg.n_experts, model_repr.parallelism_cfg.ep),
+                    safe_divide(
+                        model_repr.moe_cfg.n_experts,
+                        model_repr.parallelism_cfg.expert_mesh.ep,
+                    ),
                 ),
                 weight_repr=model_repr.mlp_down_exp_weight,  # type: ignore[arg-type]
             ),

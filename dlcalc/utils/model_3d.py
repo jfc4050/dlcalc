@@ -15,17 +15,31 @@ class ParallelConfig:
         PARTITION_GRADIENTS = 2
         PARTITION_PARAMETERS = 3
 
+    @dataclasses.dataclass
+    class ExpertParallelCfg:
+        ep: int  # Expert Parallel (EP) degree
+        tp: int
+        dp: int
+
     tp: int  # Tensor Parallel (TP) degree
     cp: int  # Context Parallel (CP) degree
-    ep: int  # Expert Parallel (EP) degree
     pp: int  # Pipeline Parallel (PP) degree
     dp: int  # Data Parallel (DP) degree
+
+    expert_mesh: ExpertParallelCfg | None
 
     vpp: int  # Virtual Pipeline Parallel (VPP) degree
 
     sp_enabled: bool  # Sequence Parallel (SP) enablement
 
     zero_level: ZeroLevel
+
+    def __post_init__(self) -> None:
+        if self.expert_mesh is not None:
+            assert (
+                self.expert_mesh.ep * self.expert_mesh.tp * self.expert_mesh.dp
+                == self.dp * self.cp * self.tp
+            )
 
     def world_size(self) -> int:
         return self.tp * self.cp * self.pp * self.dp
@@ -235,42 +249,49 @@ class ThreeDParallelModel:
             partition_spec={0: self.parallelism_cfg.tp},  # row parallel
             bits_per_elt=self.bits_per_parameter,
         )
-        self.mlp_up_exp_weight = (
-            TensorRepr(
-                # following common practice of merging up + gate matmuls in the event
-                # we're using GLU.
-                unpartitioned_shape=(
-                    n_experts,
-                    self.hidden_sz,
-                    (self.moe_cfg.expert_inter_sz * 2)
-                    if self.glu
-                    else self.moe_cfg.expert_inter_sz,
-                ),
-                partition_spec={
-                    0: self.parallelism_cfg.ep,
-                    2: self.parallelism_cfg.tp,
-                },  # col parallel
-                bits_per_elt=self.bits_per_parameter,
+
+        if self.moe_cfg is not None:
+            assert self.parallelism_cfg.expert_mesh is not None
+            self.mlp_up_exp_weight = (
+                TensorRepr(
+                    # following common practice of merging up + gate matmuls in the event
+                    # we're using GLU.
+                    unpartitioned_shape=(
+                        n_experts,
+                        self.hidden_sz,
+                        (self.moe_cfg.expert_inter_sz * 2)
+                        if self.glu
+                        else self.moe_cfg.expert_inter_sz,
+                    ),
+                    partition_spec={
+                        0: self.parallelism_cfg.expert_mesh.ep,
+                        2: self.parallelism_cfg.tp,
+                    },  # col parallel
+                    bits_per_elt=self.bits_per_parameter,
+                )
+                if self.moe_cfg is not None
+                else None
             )
-            if self.moe_cfg is not None
-            else None
-        )
-        self.mlp_down_exp_weight = (
-            TensorRepr(
-                unpartitioned_shape=(
-                    n_experts,
-                    self.moe_cfg.expert_inter_sz,
-                    self.hidden_sz,
-                ),
-                partition_spec={
-                    0: self.parallelism_cfg.ep,
-                    1: self.parallelism_cfg.tp,
-                },  # row parallel
-                bits_per_elt=self.bits_per_parameter,
+            self.mlp_down_exp_weight = (
+                TensorRepr(
+                    unpartitioned_shape=(
+                        n_experts,
+                        self.moe_cfg.expert_inter_sz,
+                        self.hidden_sz,
+                    ),
+                    partition_spec={
+                        0: self.parallelism_cfg.expert_mesh.ep,
+                        1: self.parallelism_cfg.tp,
+                    },  # row parallel
+                    bits_per_elt=self.bits_per_parameter,
+                )
+                if self.moe_cfg is not None
+                else None
             )
-            if self.moe_cfg is not None
-            else None
-        )
+        else:
+            self.mlp_up_exp_weight = None
+            self.mlp_down_exp_weight = None
+
         self.pre_mlp_norm_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz,),
             partition_spec={},  # replicated
