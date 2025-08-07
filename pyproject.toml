@@ -16,7 +16,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "mypy>=1.10.0",
-    "ruff>=0.4.3"
+    "ruff>=0.4.3",
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "pytest-mock>=3.14.0",
+    "pre-commit>=3.7.0"
 ]
 
 [project.scripts]
@@ -27,6 +31,11 @@ topoassign = "dlcalc.topology_scheduler:main"
 sps2tpd = "dlcalc.samples_per_sec_to_tokens_per_day:main"
 sps2mfu = "dlcalc.samples_per_sec_to_mfu:main"
 ckpt-summarize = "dlcalc.summarize_checkpoint:main"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
 
 [tool.mypy]
 disallow_untyped_defs = true
