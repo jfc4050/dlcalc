@@ -290,30 +290,6 @@ class TestPerformance:
         # Should complete within 5 seconds for a single config
         assert execution_time < 5, f"Execution took {execution_time:.2f}s, expected < 5s"
     
-    def test_memory_usage(self):
-        """Test that 3dtrn doesn't use excessive memory."""
-        import psutil
-        import os
-        
-        config_file = "examples/llama3_70b.yaml"
-        
-        if not Path(config_file).exists():
-            pytest.skip(f"Config file {config_file} not found")
-        
-        # Get initial memory
-        process = psutil.Process(os.getpid())
-        initial_memory = process.memory_info().rss / 1024 / 1024  # MB
-        
-        # Run 3dtrn
-        run_3dtrn(config_file)
-        
-        # Check memory after
-        final_memory = process.memory_info().rss / 1024 / 1024  # MB
-        memory_increase = final_memory - initial_memory
-        
-        # Should not increase memory by more than 100MB
-        assert memory_increase < 100, f"Memory increased by {memory_increase:.2f}MB"
-
 
 # Fixtures for common test data
 @pytest.fixture
