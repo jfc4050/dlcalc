@@ -1,5 +1,6 @@
 """CLI tool for estimating performance characteristics of 3D parallel training."""
 
+import copy
 import json
 import math
 from argparse import ArgumentParser
@@ -166,13 +167,41 @@ def main() -> None:
     # PERF ANALYSIS
     ###################################################################################
     print_h1_header("GEMMs (note numbers calculated for 100% flops+bandwidth utilization)")
-    for proj_name, weight_repr in [
-        ("QKV", model_repr.qkv_weight),
-        ("ATTN_OUT", model_repr.attn_out_weight),
-        ("MLP1", model_repr.mlp_up_weight),
-        ("MLP2", model_repr.mlp_down_weight),
-        # TODO. need different section for MoE
-    ]:
+    projections = OrderedDict(
+        {
+            "QKV": model_repr.qkv_weight,
+            "ATTN_OUT": model_repr.attn_out_weight,
+            "MLP1": model_repr.mlp_up_weight,
+            "MLP2": model_repr.mlp_down_weight,
+            # TODO. need different section for MoE
+        }
+    )
+    if model_repr.mlp_up_exp_weight is not None:
+        expert_dim, *other_dims = model_repr.mlp_up_exp_weight.shape(partitioned=False)
+        single_expert_shape = tuple(other_dims)
+        single_expert_partition_spec = {
+            k - 1: v for k, v in model_repr.mlp_up_exp_weight._partition_spec.items() if k != 0
+        }
+
+        projections["MLP1_EXP"] = TensorRepr(
+            unpartitioned_shape=single_expert_shape,
+            partition_spec=single_expert_partition_spec,
+            bits_per_elt=model_repr.bits_per_parameter,
+        )
+    if model_repr.mlp_down_exp_weight is not None:
+        expert_dim, *other_dims = model_repr.mlp_down_exp_weight.shape(partitioned=False)
+        single_expert_shape = tuple(other_dims)
+        single_expert_partition_spec = {
+            k - 1: v for k, v in model_repr.mlp_down_exp_weight._partition_spec.items() if k != 0
+        }
+
+        projections["MLP2_EXP"] = TensorRepr(
+            unpartitioned_shape=single_expert_shape,
+            partition_spec=single_expert_partition_spec,
+            bits_per_elt=model_repr.bits_per_parameter,
+        )
+
+    for proj_name, weight_repr in projections.items():
         weight_repr: TensorRepr  # type: ignore[no-redef]
         flops = compute_gemm_flops(
             n_tokens=safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)

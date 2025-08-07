@@ -61,5 +61,10 @@ select = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "types-pyyaml>=6.0.12.20250516",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["dlcalc"]
