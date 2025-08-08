@@ -50,7 +50,11 @@ def get_dp_reduce_scatter_latency_term_s(
 ) -> float:
     """assumes ring algorithm."""
     return _ring_ag_or_rs_latency_term_s(
-        n_participants=parallel_config.dp,
+        # approximation: we assume most of the parameters are MoE parameters, and calculate
+        # just for those. for most models this is good enough.
+        n_participants=parallel_config.dp
+        if parallel_config.expert_mesh is None
+        else parallel_config.expert_mesh.dp,
         link_latency_s=machine_spec.inter_node_connect.latency_sec,
     )
 
@@ -61,12 +65,18 @@ def get_dp_reduce_scatter_bw_term_s(
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
+    # approximation: we assume most of the parameters are MoE parameters, and calculate
+    # just for those. for most models this is good enough.
     return _ring_ag_or_rs_bw_term_s(
         size,
-        n_participants=parallel_config.dp,
+        n_participants=parallel_config.dp
+        if parallel_config.expert_mesh is None
+        else parallel_config.expert_mesh.dp,
         unidirectional_link_bw_bytes_per_sec=int(
             _get_effective_bw(
-                parallelism_type=ParallelismType.DP,
+                parallelism_type=ParallelismType.DP
+                if parallel_config.expert_mesh is None
+                else ParallelismType.EDP,
                 parallel_config=parallel_config,
                 machine_spec=machine_spec,
                 is_expert_comm=False,
@@ -101,7 +111,11 @@ def get_dp_all_gather_latency_term_s(
 ) -> float:
     """assumes ring algorithm."""
     return _ring_ag_or_rs_latency_term_s(
-        n_participants=parallel_config.dp,
+        # approximation: we assume most of the parameters are MoE parameters, and calculate
+        # just for those. for most models this is good enough.
+        n_participants=parallel_config.dp
+        if parallel_config.expert_mesh is None
+        else parallel_config.expert_mesh.dp,
         link_latency_s=machine_spec.inter_node_connect.latency_sec,
     )
 
@@ -112,12 +126,18 @@ def get_dp_all_gather_bw_term_s(
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
+    # approximation: we assume most of the parameters are MoE parameters, and calculate
+    # just for those. for most models this is good enough.
     return _ring_ag_or_rs_bw_term_s(
         size,
-        n_participants=parallel_config.dp,
+        n_participants=parallel_config.dp
+        if parallel_config.expert_mesh is None
+        else parallel_config.expert_mesh.dp,
         unidirectional_link_bw_bytes_per_sec=int(
             _get_effective_bw(
-                parallelism_type=ParallelismType.DP,
+                parallelism_type=ParallelismType.DP
+                if parallel_config.expert_mesh is None
+                else ParallelismType.EDP,
                 parallel_config=parallel_config,
                 machine_spec=machine_spec,
                 is_expert_comm=False,

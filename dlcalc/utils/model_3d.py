@@ -370,7 +370,7 @@ class ThreeDParallelModel:
         return sum(self.__n_layers(mpmd_partitioned=True, moe=moe) for moe in [False, True])
 
     def grad_bucket_numel(self) -> int:
-        return ceil_divide(self.bucket_size_bytes, self.bits_per_grad // 8)
+        return ceil_divide(self.bucket_size_bytes, safe_divide(self.bits_per_grad, 8))
 
     def __get_n_total_params(self, spmd_partitioned: bool, mpmd_partitioned: bool) -> int:
         return _sum(

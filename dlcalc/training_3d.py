@@ -315,14 +315,13 @@ def main() -> None:
     if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
-        # TODO. we need to fix these to account for EP and CP.
-
-        # Microbatch compute times
         print_section_separator()
         print_info("Microbatch Compute Times (100% FLOPS utilization)")
 
         devices_in_pp_stage_flops = (
-            model_repr.parallelism_cfg.tp * machine_spec.device_spec.peak_flops
+            model_repr.parallelism_cfg.cp
+            * model_repr.parallelism_cfg.tp
+            * machine_spec.device_spec.peak_flops
         )
 
         # divide by single pipeline stage TFLOPs, since its just for single
@@ -359,9 +358,6 @@ def main() -> None:
         print_kv("Params per MP rank", str(mp_params_size))
         print_kv("Bucket Size", f"{format_number(grad_bucket_numel)} params")
         print_kv("Number of Buckets", f"{math.ceil(n_buckets)}")
-        # full BW should be divided along all MP ranks within a single node, since
-        # they are each participating in their own DP collectives. We make the
-        # assumption here that TP is the only form of MP we do within node.
         grad_bucket_reduce_scatter_lat_term_s = get_dp_reduce_scatter_latency_term_s(
             parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
@@ -382,10 +378,10 @@ def main() -> None:
 
         print(f"\n  {_BOLD}Reduce-Scatter (Gradients){_END}")
         print_kv(
-            "  Latency", f"{grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms", key_width=15
+            "  Attributed to Latency  ", f"{grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms", key_width=15
         )
         print_kv(
-            "  Bandwidth", f"{grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms", key_width=15
+            "  Attributed to Bandwidth", f"{grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms", key_width=15
         )
         print_metric(
             "  Total", f"{grad_bucket_reduce_scatter_time_s * 1000:.3f}", "ms", highlight=True
@@ -407,8 +403,8 @@ def main() -> None:
         )
 
         print(f"\n  {_BOLD}All-Gather (Parameters){_END}")
-        print_kv("  Latency", f"{param_bucket_all_gather_lat_term_s * 1000:.3f} ms", key_width=15)
-        print_kv("  Bandwidth", f"{param_bucket_all_gather_bw_term_s * 1000:.3f} ms", key_width=15)
+        print_kv("  Attributed to Latency  ", f"{param_bucket_all_gather_lat_term_s * 1000:.3f} ms", key_width=15)
+        print_kv("  Attributed to Bandwidth", f"{param_bucket_all_gather_bw_term_s * 1000:.3f} ms", key_width=15)
         print_metric(
             "  Total", f"{param_bucket_all_gather_time_s * 1000:.3f}", "ms", highlight=True
         )
@@ -606,7 +602,6 @@ def main() -> None:
     )
     pipeline_bubble_time = transformer_block_time * pipeline_bubble_fraction
 
-    # TODO. these are wrong for MoE
     dp_ag_time = param_bucket_all_gather_time_s * n_buckets
     dp_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets
 
