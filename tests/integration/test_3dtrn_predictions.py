@@ -29,12 +29,14 @@ def run_3dtrn(config_file: str, timeout: int = 30) -> Tuple[Optional[float], Opt
 
         output = result.stdout + result.stderr
 
-        # Find MFU in output - looking for "predicted MFU: XX.XX%"
-        mfu_match = re.search(r"predicted MFU:\s*([0-9]+\.[0-9]+)%", output)
+        # Find MFU in output - looking for "Predicted MFU: XX.XX%" (with potential ANSI codes)
+        # Remove ANSI escape codes first for easier matching
+        clean_output = re.sub(r"\x1b\[[0-9;]*m", "", output)
+        mfu_match = re.search(r"Predicted MFU:\s*([0-9]+\.[0-9]+)%", clean_output)
         mfu_value = float(mfu_match.group(1)) if mfu_match else None
 
-        # Find total memory in output - looking for "total mem (GiB) = XX.XXXGiB"
-        mem_match = re.search(r"total mem \(GiB\) = ([0-9]+\.[0-9]+)GiB", output)
+        # Find total memory in output - looking for "Total Memory Required: XX.XXX GiB"
+        mem_match = re.search(r"Total Memory Required:\s*([0-9]+\.[0-9]+)\s*GiB", clean_output)
         mem_value = float(mem_match.group(1)) if mem_match else None
 
         return mfu_value, mem_value, output
@@ -191,17 +193,18 @@ class TestMFUPredictions:
 
         _, _, output = run_3dtrn(config_file)
 
-        # Check for expected sections in output
+        # Check for expected sections in output (remove ANSI codes first)
+        clean_output = re.sub(r"\x1b\[[0-9;]*m", "", output)
         expected_sections = [
-            "CONFIG",
-            "MODEL SUMMARY",
-            "[MEMORY]",
-            "predicted MFU:",
+            "CONFIGURATION",
+            "MODEL ARCHITECTURE",
+            "MEMORY",
+            "Predicted MFU:",
         ]
 
         missing_sections = []
         for section in expected_sections:
-            if section not in output:
+            if section not in clean_output:
                 missing_sections.append(section)
 
         assert not missing_sections, (
@@ -372,7 +375,8 @@ def test_with_sample_config(sample_config):
     assert actual_mem is not None, "Should calculate total memory for sample config"
     assert actual_mem > 0, f"Memory should be positive, got {actual_mem} GiB"
 
-    # Should have standard output sections
-    assert "CONFIG" in output
-    assert "MODEL SUMMARY" in output
-    assert "[MEMORY]" in output
+    # Should have standard output sections (check after removing ANSI codes)
+    clean_output = re.sub(r"\x1b\[[0-9;]*m", "", output)
+    assert "CONFIGURATION" in clean_output
+    assert "MODEL ARCHITECTURE" in clean_output
+    assert "MEMORY" in clean_output

@@ -26,7 +26,18 @@ from dlcalc.utils.data import Size, TensorRepr
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import product, safe_divide
 from dlcalc.utils.model_3d import MoeCfg, ParallelConfig, ThreeDParallelModel
-from dlcalc.utils.printing import print_bold, print_h1_header, print_h2_header
+from dlcalc.utils.printing import (
+    _END,
+    _GRAY,
+    format_number,
+    print_h1_header,
+    print_h2_header,
+    print_info,
+    print_kv,
+    print_metric,
+    print_section_separator,
+    print_success,
+)
 
 ASSUMED_GEMM_UTIL = 0.7
 
@@ -39,7 +50,7 @@ def main() -> None:
     with open(args.cfg_path) as f:
         cfg = yaml.safe_load(f)
 
-    print_h1_header("CONFIG")
+    print_h1_header("CONFIGURATION")
     print(json.dumps(cfg, indent=2))
 
     sequence_len = cfg["data"]["seqlen"]
@@ -101,73 +112,83 @@ def main() -> None:
 
     machine_spec = MachineSpec.from_str(cfg["hardware"]["node_type"])
     cluster_size = model_repr.parallelism_cfg.world_size()
-    print(machine_spec)
-    print("n_devices: ", cluster_size)
-    print("n_nodes: ", safe_divide(cluster_size, machine_spec.n_devices))
+
+    print_section_separator()
+    print_info("Hardware Configuration")
+    print_kv("Node Type", cfg["hardware"]["node_type"])
+    print_kv("Total Devices", str(cluster_size))
+    print_kv("Total Nodes", str(safe_divide(cluster_size, machine_spec.n_devices)))
+    print_kv("Device Memory", f"{machine_spec.device_spec.mem_capacity_bytes / (1024**3):.0f} GiB")
+    print_kv("Peak FLOPS/device", f"{machine_spec.device_spec.peak_flops / 1e12:.0f} TFLOPS")
 
     ###################################################################################
     # DATA
     ###################################################################################
-    print_h1_header("DATA")
+    print_h1_header("DATA CONFIGURATION")
     gbs = cfg["data"]["gbs"]
     mbs = cfg["data"]["microbatch_sz"]
 
     bs_per_mp_rank = safe_divide(gbs, model_repr.parallelism_cfg.dp)
     n_microbatches_per_mp_rank = safe_divide(bs_per_mp_rank, mbs)
 
-    print(f"GBS = {gbs} ({gbs * sequence_len * 1e-6:.2f}M tokens)")
-    print(f"GBS/DP = {bs_per_mp_rank}")
-    print(f"n_microbatches = {n_microbatches_per_mp_rank}")
+    print_kv("Global Batch Size", f"{gbs} samples")
+    print_kv("Total Tokens/Batch", f"{format_number(gbs * sequence_len)} tokens")
+    print_kv("Batch Size per DP Rank", str(bs_per_mp_rank))
+    print_kv("Microbatches per Rank", str(n_microbatches_per_mp_rank))
+    print_kv("Sequence Length", f"{sequence_len} tokens")
 
     ###################################################################################
     # MODEL SUMMARY
     ###################################################################################
-    print_h1_header("MODEL SUMMARY")
-    print(
-        f"params: {model_repr.get_n_total_params(partitioned=False) * 1e-9:.2f}B "
-        f"({model_repr.get_n_active_params(partitioned=False) * 1e-9:.2f}B active)"
+    print_h1_header("MODEL ARCHITECTURE")
+    total_params = model_repr.get_n_total_params(partitioned=False)
+    active_params = model_repr.get_n_active_params(partitioned=False)
+
+    print_metric("Total Parameters", format_number(total_params), highlight=True)
+    print_metric("Active Parameters", format_number(active_params))
+    print_kv("Hidden Size", str(hidden_sz))
+    print_kv("Number of Layers", str(cfg["model"]["n_layers"]))
+    print_kv(
+        "Attention Heads", f"{cfg['model']['n_q_heads']} (Q) / {cfg['model']['n_kv_heads']} (KV)"
     )
 
     ###################################################################################
     # MEMORY ANALYSIS
     ###################################################################################
-    print_h1_header("[MEMORY] STATES")
+    print_h1_header("MEMORY: MODEL STATES")
     print(model_repr.states)
 
     # activations
-    print_h1_header("[MEMORY] TRAINING ACTIVATIONS")
+    print_h1_header("MEMORY: TRAINING ACTIVATIONS")
     act_size_per_layer_per_inflight_microbatch = (
         model_repr.activation_size_per_microbatch_per_layer()
     )
-    print("act/layer/inflight:", act_size_per_layer_per_inflight_microbatch)
     max_inflight_microbatches = model_repr.parallelism_cfg.pp  # 1F1B
-    print("max(inflight):", max_inflight_microbatches)
     layers_per_pp_stage = model_repr.layers_per_pp_stage()
-    print("layers/pp:", layers_per_pp_stage)
     vpp_multiplier = model_repr.vpp_penalty()
-    print(f"VPP memory multiplier = {vpp_multiplier:.2f}")
+
+    print_kv("Activation/Layer/Microbatch", str(act_size_per_layer_per_inflight_microbatch))
+    print_kv("Max Inflight Microbatches", str(max_inflight_microbatches))
+    print_kv("Layers per PP Stage", str(layers_per_pp_stage))
+    print_kv("VPP Memory Multiplier", f"{vpp_multiplier:.2f}x")
     act_memory = (
         act_size_per_layer_per_inflight_microbatch
         * min(n_microbatches_per_mp_rank, max_inflight_microbatches)
         * math.ceil(vpp_multiplier * layers_per_pp_stage)
     )
-    print(
-        f"act/pp_stage = "
-        f"per_microbatch_per_layer_per_inflight * "
-        f"{max_inflight_microbatches} * "
-        f"{math.ceil(vpp_multiplier * layers_per_pp_stage)} = "
-        f"{act_memory}"
-    )
+    print_kv("Total Activation Memory", f"{act_memory.bytes() / (1024**3):.3f} GiB")
 
-    print_h1_header("[MEMORY] TOTAL")
-    print(
-        f"total mem (GiB) = {(model_repr.states.total_bytes(partitioned=True) + act_memory.bytes()) / (1024**3):.3f}GiB"
+    print_h1_header("MEMORY: SUMMARY")
+    total_memory_gib = (model_repr.states.total_bytes(partitioned=True) + act_memory.bytes()) / (
+        1024**3
     )
+    print_success(f"Total Memory Required: {total_memory_gib:.3f} GiB per device")
 
     ###################################################################################
     # PERF ANALYSIS
     ###################################################################################
-    print_h1_header("GEMMs (note numbers calculated for 100% flops+bandwidth utilization)")
+    print_h1_header("COMPUTE: GEMM OPERATIONS")
+    print_info("Note: Numbers calculated assuming 100% FLOPS and bandwidth utilization")
     projections = OrderedDict(
         {
             "QKV": model_repr.qkv_weight,
@@ -242,26 +263,31 @@ def main() -> None:
             f"{output_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms"
         )
 
-    print_h1_header("TP COMMUNICATION")
+    print_h1_header("COMMUNICATION: TENSOR PARALLELISM")
     # TODO. assumes SP, analysis pretty similar if not SP though
     activation_size = Size(
         numel=safe_divide(sequence_len, model_repr.parallelism_cfg.cp) * microbatch_sz * hidden_sz,
         bits_per_element=model_repr.bits_per_parameter,
     )
-    print(
-        f"TP all-gather: {activation_size}: {get_tp_all_gather_comm_time_s(size=activation_size, parallel_config=model_repr.parallelism_cfg, machine_spec=machine_spec) * 1000:.3f} ms"
+    tp_ag_time = get_tp_all_gather_comm_time_s(
+        size=activation_size, parallel_config=model_repr.parallelism_cfg, machine_spec=machine_spec
     )
-    print(
-        f"TP reduce-scatter: {activation_size}: {get_tp_reduce_scatter_comm_time_s(size=activation_size, parallel_config=model_repr.parallelism_cfg, machine_spec=machine_spec) * 1000:.3f} ms"
+    tp_rs_time = get_tp_reduce_scatter_comm_time_s(
+        size=activation_size, parallel_config=model_repr.parallelism_cfg, machine_spec=machine_spec
     )
 
-    print_h1_header("PP COMMUNICATION")
+    print_kv("TP All-Gather", f"{tp_ag_time * 1000:.3f} ms")
+    print_kv("TP Reduce-Scatter", f"{tp_rs_time * 1000:.3f} ms")
+    print_kv("Activation Size", str(activation_size))
+
+    print_h1_header("COMMUNICATION: PIPELINE PARALLELISM")
     activation_send_time_s = (
         activation_size.bytes() / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
     )
-    print(f"PP send/recv: {activation_size}: {activation_send_time_s * 1000:.3f} ms")
+    print_kv("PP Send/Recv Time", f"{activation_send_time_s * 1000:.3f} ms")
+    print_kv("Activation Size", str(activation_size))
 
-    print_h1_header("PIPELINE BUBBLE")
+    print_h1_header("PERFORMANCE: PIPELINE BUBBLE")
 
     vpp = cfg["parallelism"]["vpp"]
     bs_per_mp_rank = safe_divide(gbs, model_repr.parallelism_cfg.dp)
@@ -270,10 +296,10 @@ def main() -> None:
         (1 / vpp) * (model_repr.parallelism_cfg.pp - 1) / n_microbatches_per_mp_rank
     )
 
-    print(f"VPP pipeline bubble multiplier = {(1 / vpp):.2f}")
-    print(f"pipeline bubble fraction = {pipeline_bubble_fraction:.2f}")
+    print_kv("VPP Pipeline Bubble Multiplier", f"{(1 / vpp):.2f}x")
+    print_kv("Pipeline Bubble Fraction", f"{pipeline_bubble_fraction:.2%}")
 
-    print_h1_header("DP COMMUNICATION")
+    print_h1_header("COMMUNICATION: DATA PARALLELISM")
     if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
@@ -376,7 +402,7 @@ def main() -> None:
     ##################################################################################
     # Iteration Time
     ##################################################################################
-    print_h1_header("ITERATION TIME (IN PROGRESS - DON'T TRUST ME)")
+    print_h1_header("PERFORMANCE: ITERATION TIME ANALYSIS")
     n_tokens = model_repr.microbatch_sz * model_repr.sequence_len
 
     def compute_gemm_time_s(weight_repr: TensorRepr) -> float:
@@ -518,13 +544,35 @@ def main() -> None:
     print()
     print_h2_header("TRANSFORMER BLOCK COMPONENTS")
     total_transformer_block_time_s = sum(transformer_block_time_components.values())
+
+    # Keep original ordering to preserve logical flow of operations
     for component_name, component_time_s in transformer_block_time_components.items():
+        time_ms = component_time_s * 1000
+        percentage = (component_time_s / total_transformer_block_time_s) * 100
+
+        # Format component name with proper spacing
+        formatted_name = component_name.replace("_", " ").title()
+
+        # Use color coding based on percentage
+        if percentage > 20:
+            color = "\033[91m"  # Red for high cost
+        elif percentage > 10:
+            color = "\033[93m"  # Yellow for medium cost
+        else:
+            color = "\033[92m"  # Green for low cost
+
+        # Create a simple bar chart
+        bar_length = int(percentage / 2)  # Scale to max 50 chars
+        bar = "█" * bar_length
+
         print(
-            component_name.ljust(30),
-            f"{component_time_s * 1000:.2f}ms / {(component_time_s / total_transformer_block_time_s) * 100:.2f}%",
+            f"  {formatted_name.ljust(25)} {color}{time_ms:7.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
         )
 
-    print(f"total transformer block: {total_transformer_block_time_s * 1000:.2f}ms")
+    print()
+    print_metric(
+        "Total Block Time", f"{total_transformer_block_time_s * 1000:.2f}", "ms", highlight=True
+    )
     print()
 
     transformer_block_fwd_time = sum(transformer_block_time_components.values())
@@ -558,15 +606,47 @@ def main() -> None:
 
     print_h2_header("ITERATION TIME COMPONENTS")
     iteration_time_s = sum(iteration_time_components.values())
-    for component_name, component_time_s in iteration_time_components.items():
+
+    # Sort components by time (descending) for better readability
+    sorted_iteration_components = sorted(
+        iteration_time_components.items(), key=lambda x: x[1], reverse=True
+    )
+
+    for component_name, component_time_s in sorted_iteration_components:
+        time_ms = component_time_s * 1000
+        percentage = (component_time_s / iteration_time_s) * 100
+
+        # Format component name
+        name_map = {
+            "dp_ag": "DP All-Gather",
+            "dp_rs": "DP Reduce-Scatter",
+            "transformer_block": "Transformer Blocks",
+            "pipeline_bubble": "Pipeline Bubble",
+            "opt_step": "Optimizer Step",
+        }
+        formatted_name = name_map.get(component_name, component_name.replace("_", " ").title())
+
+        # Use color coding based on percentage
+        if percentage > 30:
+            color = "\033[91m"  # Red for dominant component
+        elif percentage > 15:
+            color = "\033[93m"  # Yellow for significant component
+        else:
+            color = "\033[92m"  # Green for small component
+
+        # Create a simple bar chart
+        bar_length = int(percentage / 2)  # Scale to max 50 chars
+        bar = "█" * bar_length
+
         print(
-            component_name.ljust(30),
-            f"{component_time_s * 1000:.2f}ms / {(component_time_s / iteration_time_s) * 100:.2f}%",
+            f"  {formatted_name.ljust(20)} {color}{time_ms:8.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
         )
+
     print()
 
-    print_h2_header("SUMMARY")
-    print_bold(f"iteration time: {iteration_time_s:.2f}s")
+    print_h2_header("FINAL RESULTS")
+    print()
+    print_metric("Iteration Time", f"{iteration_time_s:.2f}", "seconds", highlight=True)
 
     ideal_iteration_time = (
         gbs
@@ -575,9 +655,12 @@ def main() -> None:
         * model_repr.get_n_active_params(partitioned=False)
         / (cluster_size * machine_spec.device_spec.peak_flops)
     )
-    print_bold(f"ideal iteration time: {ideal_iteration_time:.5f}s")
+    print_metric("Ideal Iteration Time", f"{ideal_iteration_time:.5f}", "seconds")
 
-    print_bold(f"predicted MFU: {(ideal_iteration_time / iteration_time_s) * 100:.2f}%")
+    mfu_percentage = (ideal_iteration_time / iteration_time_s) * 100
+    print()
+    print_success(f"Predicted MFU: {mfu_percentage:.2f}%")
+    print()
 
 
 if __name__ == "__main__":
