@@ -31,6 +31,9 @@ from dlcalc.utils.printing import (
     _END,
     _GRAY,
     format_number,
+    get_color_by_percentage,
+    get_color_by_time_ms,
+    get_color_for_component_percentage,
     print_h1_header,
     print_h2_header,
     print_info,
@@ -244,12 +247,7 @@ def main() -> None:
         compute_time_ms = flops / machine_spec.device_spec.peak_flops * 1000
 
         # Color based on compute intensity
-        if compute_time_ms > 0.5:
-            color = "\033[91m"  # Red for compute-heavy
-        elif compute_time_ms > 0.2:
-            color = "\033[93m"  # Yellow for medium
-        else:
-            color = "\033[92m"  # Green for light
+        color = get_color_by_time_ms(compute_time_ms)
 
         print(f"\n  {_BOLD}{proj_name}{_END}")
         print(
@@ -378,10 +376,14 @@ def main() -> None:
 
         print(f"\n  {_BOLD}Reduce-Scatter (Gradients){_END}")
         print_kv(
-            "  Attributed to Latency  ", f"{grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms", key_width=15
+            "  Attributed to Latency  ",
+            f"{grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms",
+            key_width=15,
         )
         print_kv(
-            "  Attributed to Bandwidth", f"{grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms", key_width=15
+            "  Attributed to Bandwidth",
+            f"{grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms",
+            key_width=15,
         )
         print_metric(
             "  Total", f"{grad_bucket_reduce_scatter_time_s * 1000:.3f}", "ms", highlight=True
@@ -403,8 +405,16 @@ def main() -> None:
         )
 
         print(f"\n  {_BOLD}All-Gather (Parameters){_END}")
-        print_kv("  Attributed to Latency  ", f"{param_bucket_all_gather_lat_term_s * 1000:.3f} ms", key_width=15)
-        print_kv("  Attributed to Bandwidth", f"{param_bucket_all_gather_bw_term_s * 1000:.3f} ms", key_width=15)
+        print_kv(
+            "  Attributed to Latency  ",
+            f"{param_bucket_all_gather_lat_term_s * 1000:.3f} ms",
+            key_width=15,
+        )
+        print_kv(
+            "  Attributed to Bandwidth",
+            f"{param_bucket_all_gather_bw_term_s * 1000:.3f} ms",
+            key_width=15,
+        )
         print_metric(
             "  Total", f"{param_bucket_all_gather_time_s * 1000:.3f}", "ms", highlight=True
         )
@@ -570,13 +580,8 @@ def main() -> None:
         # Format component name with proper spacing
         formatted_name = component_name.replace("_", " ").title()
 
-        # Use color coding based on percentage
-        if percentage > 20:
-            color = "\033[91m"  # Red for high cost
-        elif percentage > 10:
-            color = "\033[93m"  # Yellow for medium cost
-        else:
-            color = "\033[92m"  # Green for low cost
+        # Use color coding based on percentage (custom thresholds for block components)
+        color = get_color_for_component_percentage(percentage)
 
         # Create a simple bar chart
         bar_length = int(percentage / 2)  # Scale to max 50 chars
@@ -643,12 +648,7 @@ def main() -> None:
         formatted_name = name_map.get(component_name, component_name.replace("_", " ").title())
 
         # Use color coding based on percentage
-        if percentage > 30:
-            color = "\033[91m"  # Red for dominant component
-        elif percentage > 15:
-            color = "\033[93m"  # Yellow for significant component
-        else:
-            color = "\033[92m"  # Green for small component
+        color = get_color_by_percentage(percentage)
 
         # Create a simple bar chart
         bar_length = int(percentage / 2)  # Scale to max 50 chars

@@ -80,3 +80,73 @@ def print_h2_header(section_name: str) -> None:
     print()
     print(f"{_BOLD}{_BLUE}▶ {section_name}{_END}")
     print(f"{_BLUE}{'-' * 60}{_END}")
+
+
+def get_color_by_intensity(value: float, high_threshold: float, medium_threshold: float) -> str:
+    """Get color based on intensity value.
+
+    Args:
+        value: The value to evaluate
+        high_threshold: Values >= this are considered high (red)
+        medium_threshold: Values >= this are considered medium (yellow)
+
+    Returns:
+        Color code string (red for high, yellow for medium, green for low)
+    """
+    if value >= high_threshold:
+        return _RED
+    elif value >= medium_threshold:
+        return _YELLOW
+    else:
+        return _GREEN
+
+
+def get_color_by_percentage(percentage: float) -> str:
+    """Get color based on percentage value.
+
+    Common thresholds for percentages:
+    - >= 30%: Red (dominant)
+    - >= 15%: Yellow (significant)
+    - < 15%: Green (small)
+
+    Args:
+        percentage: The percentage value (0-100)
+
+    Returns:
+        Color code string
+    """
+    return get_color_by_intensity(percentage, 30, 15)
+
+
+def get_color_by_time_ms(time_ms: float) -> str:
+    """Get color based on time in milliseconds.
+
+    Common thresholds for compute time:
+    - >= 0.5ms: Red (compute-heavy)
+    - >= 0.2ms: Yellow (medium)
+    - < 0.2ms: Green (light)
+
+    Args:
+        time_ms: Time in milliseconds
+
+    Returns:
+        Color code string
+    """
+    return get_color_by_intensity(time_ms, 0.5, 0.2)
+
+
+def get_color_for_component_percentage(percentage: float) -> str:
+    """Get color for transformer block component based on percentage.
+
+    Uses specialized thresholds for block-level components:
+    - >= 20%: Red (dominant within block)
+    - >= 10%: Yellow (significant within block)
+    - < 10%: Green (small within block)
+
+    Args:
+        percentage: The percentage value (0-100)
+
+    Returns:
+        Color code string
+    """
+    return get_color_by_intensity(percentage, 20, 10)
