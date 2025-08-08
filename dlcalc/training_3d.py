@@ -119,11 +119,19 @@ def main() -> None:
 
     print_section_separator()
     print_info("Hardware Configuration")
-    print_kv("Node Type", cfg["hardware"]["node_type"])
-    print_kv("Total Devices", str(cluster_size))
-    print_kv("Total Nodes", str(safe_divide(cluster_size, machine_spec.n_devices)))
-    print_kv("Device Memory", f"{machine_spec.device_spec.mem_capacity_bytes / (1024**3):.0f} GiB")
-    print_kv("Peak FLOPS/device", f"{machine_spec.device_spec.peak_flops / 1e12:.0f} TFLOPS")
+    print_kv("Node Type", cfg["hardware"]["node_type"], key_width=30)
+    print_kv("Total Devices", str(cluster_size), key_width=30)
+    print_kv("Total Nodes", str(safe_divide(cluster_size, machine_spec.n_devices)), key_width=30)
+    print_kv(
+        "Device Memory",
+        f"{machine_spec.device_spec.mem_capacity_bytes / (1024**3):.0f} GiB",
+        key_width=30,
+    )
+    print_kv(
+        "Peak FLOPS/device",
+        f"{machine_spec.device_spec.peak_flops / 1e12:.0f} TFLOPS",
+        key_width=30,
+    )
 
     ###################################################################################
     # DATA
@@ -136,11 +144,11 @@ def main() -> None:
     bs_per_mp_rank = safe_divide(gbs, model_repr.parallelism_cfg.dp)
     n_microbatches_per_mp_rank = safe_divide(bs_per_mp_rank, mbs)
 
-    print_kv("Global Batch Size", f"{gbs} samples")
-    print_kv("Total Tokens/Batch", f"{format_number(gbs * sequence_len)} tokens")
-    print_kv("Batch Size per DP Rank", str(bs_per_mp_rank))
-    print_kv("Microbatches per Rank", str(n_microbatches_per_mp_rank))
-    print_kv("Sequence Length", f"{sequence_len} tokens")
+    print_kv("Global Batch Size", f"{gbs} samples", key_width=30)
+    print_kv("Total Tokens/Batch", f"{format_number(gbs * sequence_len)} tokens", key_width=30)
+    print_kv("Batch Size per DP Rank", str(bs_per_mp_rank), key_width=30)
+    print_kv("Microbatches per Rank", str(n_microbatches_per_mp_rank), key_width=30)
+    print_kv("Sequence Length", f"{sequence_len} tokens", key_width=30)
 
     ###################################################################################
     # MODEL SUMMARY
@@ -152,10 +160,12 @@ def main() -> None:
 
     print_metric("Total Parameters", format_number(total_params), highlight=True)
     print_metric("Active Parameters", format_number(active_params))
-    print_kv("Hidden Size", str(hidden_sz))
-    print_kv("Number of Layers", str(cfg["model"]["n_layers"]))
+    print_kv("Hidden Size", str(hidden_sz), key_width=30)
+    print_kv("Number of Layers", str(cfg["model"]["n_layers"]), key_width=30)
     print_kv(
-        "Attention Heads", f"{cfg['model']['n_q_heads']} (Q) / {cfg['model']['n_kv_heads']} (KV)"
+        "Attention Heads",
+        f"{cfg['model']['n_q_heads']} (Q) / {cfg['model']['n_kv_heads']} (KV)",
+        key_width=30,
     )
 
     ###################################################################################
@@ -290,16 +300,16 @@ def main() -> None:
         size=activation_size, parallel_config=model_repr.parallelism_cfg, machine_spec=machine_spec
     )
 
-    print_kv("TP All-Gather", f"{tp_ag_time * 1000:.3f} ms")
-    print_kv("TP Reduce-Scatter", f"{tp_rs_time * 1000:.3f} ms")
-    print_kv("Activation Size", str(activation_size))
+    print_kv("TP All-Gather", f"{tp_ag_time * 1000:.3f} ms", key_width=30)
+    print_kv("TP Reduce-Scatter", f"{tp_rs_time * 1000:.3f} ms", key_width=30)
+    print_kv("Activation Size", str(activation_size), key_width=30)
 
     print_h1_header("COMMUNICATION: PIPELINE PARALLELISM")
     activation_send_time_s = (
         activation_size.bytes() / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
     )
-    print_kv("PP Send/Recv Time", f"{activation_send_time_s * 1000:.3f} ms")
-    print_kv("Activation Size", str(activation_size))
+    print_kv("PP Send/Recv Time", f"{activation_send_time_s * 1000:.3f} ms", key_width=30)
+    print_kv("Activation Size", str(activation_size), key_width=30)
 
     print_h1_header("PERFORMANCE: PIPELINE BUBBLE")
 
@@ -310,8 +320,8 @@ def main() -> None:
         (1 / vpp) * (model_repr.parallelism_cfg.pp - 1) / n_microbatches_per_mp_rank
     )
 
-    print_kv("VPP Pipeline Bubble Multiplier", f"{(1 / vpp):.2f}x", key_width=35)
-    print_kv("Pipeline Bubble Fraction", f"{pipeline_bubble_fraction:.2%}", key_width=35)
+    print_kv("VPP Pipeline Bubble Multiplier", f"{(1 / vpp):.2f}x", key_width=30)
+    print_kv("Pipeline Bubble Fraction", f"{pipeline_bubble_fraction:.2%}", key_width=30)
 
     print_h1_header("COMMUNICATION: DATA PARALLELISM")
     if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
@@ -335,8 +345,8 @@ def main() -> None:
             model_repr.get_single_microbatch_bwd_flops() / devices_in_pp_stage_flops
         )
 
-        print_kv("Forward Pass", f"{single_microbatch_fwd_time * 1000:.3f} ms")
-        print_kv("Backward Pass", f"{single_microbatch_bwd_time * 1000:.3f} ms")
+        print_kv("Forward Pass", f"{single_microbatch_fwd_time * 1000:.3f} ms", key_width=30)
+        print_kv("Backward Pass", f"{single_microbatch_bwd_time * 1000:.3f} ms", key_width=30)
 
         # Gradient bucketing configuration
         print_section_separator()
@@ -357,9 +367,9 @@ def main() -> None:
         )
         n_buckets = mp_params_size.numel() / grad_bucket_numel
 
-        print_kv("Params per MP rank", str(mp_params_size))
-        print_kv("Bucket Size", f"{format_number(grad_bucket_numel)} params")
-        print_kv("Number of Buckets", f"{math.ceil(n_buckets)}")
+        print_kv("Params per MP rank", str(mp_params_size), key_width=30)
+        print_kv("Bucket Size", f"{format_number(grad_bucket_numel)} params", key_width=30)
+        print_kv("Number of Buckets", f"{math.ceil(n_buckets)}", key_width=30)
         grad_bucket_reduce_scatter_lat_term_s = get_dp_reduce_scatter_latency_term_s(
             parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
@@ -380,14 +390,14 @@ def main() -> None:
 
         print(f"\n  {_BOLD}Reduce-Scatter (Gradients){_END}")
         print_kv(
-            "  Attributed to Latency  ",
+            "  Attributed to Latency",
             f"{grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms",
-            key_width=15,
+            key_width=30,
         )
         print_kv(
             "  Attributed to Bandwidth",
             f"{grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms",
-            key_width=15,
+            key_width=30,
         )
         print_metric(
             "  Total", f"{grad_bucket_reduce_scatter_time_s * 1000:.3f}", "ms", highlight=True
@@ -410,14 +420,14 @@ def main() -> None:
 
         print(f"\n  {_BOLD}All-Gather (Parameters){_END}")
         print_kv(
-            "  Attributed to Latency  ",
+            "  Attributed to Latency",
             f"{param_bucket_all_gather_lat_term_s * 1000:.3f} ms",
-            key_width=15,
+            key_width=30,
         )
         print_kv(
             "  Attributed to Bandwidth",
             f"{param_bucket_all_gather_bw_term_s * 1000:.3f} ms",
-            key_width=15,
+            key_width=30,
         )
         print_metric(
             "  Total", f"{param_bucket_all_gather_time_s * 1000:.3f}", "ms", highlight=True
@@ -430,8 +440,8 @@ def main() -> None:
         total_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets * 1000
         total_ag_time = param_bucket_all_gather_time_s * n_buckets * 1000
 
-        print_kv("Reduce-Scatter Total", f"{total_rs_time:.2f} ms")
-        print_kv("All-Gather Total", f"{total_ag_time:.2f} ms")
+        print_kv("Reduce-Scatter Total", f"{total_rs_time:.2f} ms", key_width=30)
+        print_kv("All-Gather Total", f"{total_ag_time:.2f} ms", key_width=30)
         print_metric(
             "Combined DP Comm", f"{total_rs_time + total_ag_time:.2f}", "ms", highlight=True
         )
