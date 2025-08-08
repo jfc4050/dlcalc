@@ -12,15 +12,15 @@ from typing import Optional, Tuple
 import pytest
 
 
-def run_3dtrn(config_file: str, timeout: int = 30) -> Tuple[Optional[float], str]:
-    """Run 3dtrn and extract MFU value from output.
+def run_3dtrn(config_file: str, timeout: int = 30) -> Tuple[Optional[float], Optional[float], str]:
+    """Run 3dtrn and extract MFU and total memory values from output.
 
     Args:
         config_file: Path to YAML configuration file
         timeout: Maximum time to wait for command completion
 
     Returns:
-        Tuple of (MFU percentage or None if not found, full output)
+        Tuple of (MFU percentage or None, total memory in GiB or None, full output)
     """
     try:
         result = subprocess.run(
@@ -31,10 +31,13 @@ def run_3dtrn(config_file: str, timeout: int = 30) -> Tuple[Optional[float], str
 
         # Find MFU in output - looking for "predicted MFU: XX.XX%"
         mfu_match = re.search(r"predicted MFU:\s*([0-9]+\.[0-9]+)%", output)
-        if mfu_match:
-            return float(mfu_match.group(1)), output
+        mfu_value = float(mfu_match.group(1)) if mfu_match else None
 
-        return None, output
+        # Find total memory in output - looking for "total mem (GiB) = XX.XXXGiB"
+        mem_match = re.search(r"total mem \(GiB\) = ([0-9]+\.[0-9]+)GiB", output)
+        mem_value = float(mem_match.group(1)) if mem_match else None
+
+        return mfu_value, mem_value, output
 
     except subprocess.TimeoutExpired:
         pytest.fail(f"Timeout ({timeout}s) running {config_file}")
@@ -48,24 +51,24 @@ class TestMFUPredictions:
     """Test MFU predictions for various model configurations."""
 
     def test_llama3_70b_mfu(self):
-        """Test that LLaMA-3 70B configuration predicts ~30.22% MFU."""
+        """Test that LLaMA-3 70B configuration predicts ~30.22% MFU and correct memory."""
         config_file = "examples/llama3_70b.yaml"
 
         # Skip if config file doesn't exist
         if not Path(config_file).exists():
             pytest.skip(f"Config file {config_file} not found")
 
-        # Run 3dtrn and get MFU
-        actual_mfu, output = run_3dtrn(config_file)
+        # Run 3dtrn and get MFU and memory
+        actual_mfu, actual_mem, output = run_3dtrn(config_file)
 
         # Check that we got an MFU value
         assert actual_mfu is not None, f"Could not find MFU in output:\n{output[-1000:]}"
 
-        # Expected value with tolerance
+        # Expected MFU value with tolerance
         expected_mfu = 30.22
         tolerance = 0.5  # Allow 0.5% difference
 
-        # Check if within tolerance
+        # Check if MFU within tolerance
         difference = abs(actual_mfu - expected_mfu)
         assert difference <= tolerance, (
             f"MFU prediction {actual_mfu}% is outside tolerance. "
@@ -73,30 +76,60 @@ class TestMFUPredictions:
             f"Difference: {difference:.2f}%"
         )
 
+        # Check that we got a memory value
+        assert actual_mem is not None, f"Could not find total memory in output:\n{output[-1000:]}"
+
+        # Expected memory value with tolerance
+        expected_mem = 31.965  # GiB
+        mem_tolerance = 0.5  # Allow 0.5 GiB difference
+
+        # Check if memory within tolerance
+        mem_difference = abs(actual_mem - expected_mem)
+        assert mem_difference <= mem_tolerance, (
+            f"Memory prediction {actual_mem} GiB is outside tolerance. "
+            f"Expected: {expected_mem} GiB ± {mem_tolerance} GiB, "
+            f"Difference: {mem_difference:.3f} GiB"
+        )
+
     def test_gpt_oss_120b_mfu(self):
-        """Test that GPT OSS 120B MoE configuration predicts the right MFU."""
+        """Test that GPT OSS 120B MoE configuration predicts the right MFU and memory."""
         config_file = "examples/gpt_oss_120b.yaml"
 
         # Skip if config file doesn't exist
         if not Path(config_file).exists():
             pytest.skip(f"Config file {config_file} not found")
 
-        # Run 3dtrn and get MFU
-        actual_mfu, output = run_3dtrn(config_file)
+        # Run 3dtrn and get MFU and memory
+        actual_mfu, actual_mem, output = run_3dtrn(config_file)
 
         # Check that we got an MFU value
         assert actual_mfu is not None, f"Could not find MFU in output:\n{output[-1000:]}"
 
-        # Expected value with tolerance
-        expected_mfu = 17.3
+        # Expected MFU value with tolerance
+        expected_mfu = 17.31
         tolerance = 0.5  # Allow 0.5% difference
 
-        # Check if within tolerance
+        # Check if MFU within tolerance
         difference = abs(actual_mfu - expected_mfu)
         assert difference <= tolerance, (
             f"MFU prediction {actual_mfu}% is outside tolerance. "
             f"Expected: {expected_mfu}% ± {tolerance}%, "
             f"Difference: {difference:.2f}%"
+        )
+
+        # Check that we got a memory value
+        assert actual_mem is not None, f"Could not find total memory in output:\n{output[-1000:]}"
+
+        # Expected memory value with tolerance
+        expected_mem = 5.895  # GiB
+        mem_tolerance = 0.5  # Allow 0.5 GiB difference
+
+        # Check if memory within tolerance
+        mem_difference = abs(actual_mem - expected_mem)
+        assert mem_difference <= mem_tolerance, (
+            f"Memory prediction {actual_mem} GiB is outside tolerance. "
+            f"Expected: {expected_mem} GiB ± {mem_tolerance} GiB, "
+            f"Difference: {mem_difference:.3f} GiB"
         )
 
         # Check that output mentions MoE since this is an MoE model
@@ -109,7 +142,7 @@ class TestMFUPredictions:
         # Define test cases: (config_file, expected_mfu, tolerance)
         test_cases = [
             ("examples/llama3_70b.yaml", 30.22, 0.5),
-            ("examples/gpt_oss_120b.yaml", 17.3, 0.5),
+            ("examples/gpt_oss_120b.yaml", 17.31, 0.5),
             # Add more test cases as needed
             # ("examples/llama3_8b.yaml", 45.0, 1.0),
         ]
@@ -120,7 +153,7 @@ class TestMFUPredictions:
                 results.append((config_file, "SKIPPED", "File not found"))
                 continue
 
-            actual_mfu, output = run_3dtrn(config_file)
+            actual_mfu, actual_mem, output = run_3dtrn(config_file)
 
             if actual_mfu is None:
                 results.append((config_file, "FAILED", "MFU not found in output"))
@@ -156,7 +189,7 @@ class TestMFUPredictions:
         if not Path(config_file).exists():
             pytest.skip(f"Config file {config_file} not found")
 
-        _, output = run_3dtrn(config_file)
+        _, _, output = run_3dtrn(config_file)
 
         # Check for expected sections in output
         expected_sections = [
@@ -206,7 +239,7 @@ class TestMFUPredictions:
             yaml.dump(config, f)
 
         # Run and check MFU
-        actual_mfu, output = run_3dtrn(str(temp_config))
+        actual_mfu, actual_mem, output = run_3dtrn(str(temp_config))
 
         if actual_mfu is None:
             pytest.fail(f"Could not extract MFU for batch size {batch_size}")
@@ -329,11 +362,15 @@ def sample_config(tmp_path):
 
 def test_with_sample_config(sample_config):
     """Test 3dtrn with a generated sample configuration."""
-    actual_mfu, output = run_3dtrn(str(sample_config))
+    actual_mfu, actual_mem, output = run_3dtrn(str(sample_config))
 
     # Should produce some MFU value
     assert actual_mfu is not None, "Should calculate MFU for sample config"
     assert 0 < actual_mfu < 100, f"MFU should be between 0 and 100, got {actual_mfu}"
+
+    # Should produce some memory value
+    assert actual_mem is not None, "Should calculate total memory for sample config"
+    assert actual_mem > 0, f"Memory should be positive, got {actual_mem} GiB"
 
     # Should have standard output sections
     assert "CONFIG" in output
