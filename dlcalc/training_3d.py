@@ -4,6 +4,7 @@ import json
 import math
 from argparse import ArgumentParser
 from collections import OrderedDict
+from typing import Any, Dict
 
 import yaml
 
@@ -24,7 +25,7 @@ from dlcalc.utils.compute import compute_gemm_flops
 from dlcalc.utils.configurations import ActivationCheckpointingType
 from dlcalc.utils.data import Size, TensorRepr
 from dlcalc.utils.hardware import MachineSpec
-from dlcalc.utils.math import product, safe_divide
+from dlcalc.utils.math import safe_divide
 from dlcalc.utils.model_3d import MoeCfg, ParallelConfig, ThreeDParallelModel
 from dlcalc.utils.printing import (
     _BOLD,
@@ -227,9 +228,9 @@ def main() -> None:
         )
 
     # Collect all GEMM operations data first
-    gemm_operations = []
-    total_compute_time_ms = 0
-    
+    gemm_operations: list[Dict[str, Any]] = []
+    total_compute_time_ms = 0.0
+
     for proj_name, weight_repr in projections.items():
         weight_repr: TensorRepr  # type: ignore[no-redef]
         flops = compute_gemm_flops(
@@ -237,47 +238,54 @@ def main() -> None:
             * model_repr.microbatch_sz,
             weight_shape=weight_repr.shape(partitioned=True),
         )
-        
+
         compute_time_ms = flops / machine_spec.device_spec.peak_flops * 1000
         total_compute_time_ms += compute_time_ms
-        
+
         bytes_per_element = model_repr.bits_per_parameter // 8
         gemm_input_dim, gemm_output_dim = weight_repr.shape(partitioned=True)
         weight_bytes = bytes_per_element * weight_repr.numel(partitioned=True)
-        input_bytes = bytes_per_element * product(
-            safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp),
-            model_repr.microbatch_sz,
-            gemm_input_dim,
+        input_bytes = (
+            bytes_per_element
+            * safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
+            * model_repr.microbatch_sz
+            * gemm_input_dim
         )
-        output_bytes = bytes_per_element * product(
-            safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp),
-            model_repr.microbatch_sz,
-            gemm_output_dim,
+        output_bytes = (
+            bytes_per_element
+            * safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
+            * model_repr.microbatch_sz
+            * gemm_output_dim
         )
-        
+
         input_time_ms = input_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
         weight_time_ms = weight_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
         output_time_ms = output_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
-        
-        gemm_operations.append({
-            "name": proj_name,
-            "weight_repr": weight_repr,
-            "flops": flops,
-            "compute_time_ms": compute_time_ms,
-            "input_bytes": input_bytes,
-            "input_time_ms": input_time_ms,
-            "weight_bytes": weight_bytes,
-            "weight_time_ms": weight_time_ms,
-            "output_bytes": output_bytes,
-            "output_time_ms": output_time_ms,
-        })
-    
+
+        gemm_operations.append(
+            {
+                "name": proj_name,
+                "weight_repr": weight_repr,
+                "flops": flops,
+                "compute_time_ms": compute_time_ms,
+                "input_bytes": input_bytes,
+                "input_time_ms": input_time_ms,
+                "weight_bytes": weight_bytes,
+                "weight_time_ms": weight_time_ms,
+                "output_bytes": output_bytes,
+                "output_time_ms": output_time_ms,
+            }
+        )
+
     # Display GEMM operations with better formatting
     for op in gemm_operations:
-        percentage = (op["compute_time_ms"] / total_compute_time_ms) * 100 if total_compute_time_ms > 0 else 0
+        compute_time_ms = float(op["compute_time_ms"])
+        percentage = (
+            (compute_time_ms / total_compute_time_ms) * 100 if total_compute_time_ms > 0 else 0
+        )
         bar_length = int(percentage / 2)
         bar = "█" * bar_length
-        
+
         # Format operation name nicely
         op_name_map = {
             "QKV": "QKV Projection",
@@ -287,28 +295,41 @@ def main() -> None:
             "MLP1_EXP": "MLP Up (Expert)",
             "MLP2_EXP": "MLP Down (Expert)",
         }
-        op_name_formatted = op_name_map.get(op["name"], op["name"])
-        
+        op_name_str = str(op["name"])
+        op_name_formatted = op_name_map.get(op_name_str, op_name_str)
+
         # Color based on compute intensity
-        if op["compute_time_ms"] > 0.5:
+        if compute_time_ms > 0.5:
             color = "\033[91m"  # Red for compute-heavy
-        elif op["compute_time_ms"] > 0.2:
+        elif compute_time_ms > 0.2:
             color = "\033[93m"  # Yellow for medium
         else:
             color = "\033[92m"  # Green for light
-        
+
+        op_weight_repr: TensorRepr = op["weight_repr"]  # type: ignore[assignment]
         print(f"\n  {_BOLD}{op_name_formatted}{_END}")
-        print(f"    Shape: {op['weight_repr'].shape(partitioned=False)} → {op['weight_repr'].shape(partitioned=True)} (with TP={model_repr.parallelism_cfg.tp})")
-        
+        print(
+            f"    Shape: {op_weight_repr.shape(partitioned=False)} → {op_weight_repr.shape(partitioned=True)}"
+        )
+
         # Compute metrics with bar
-        print(f"    Compute: {color}{op['compute_time_ms']:.3f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}")
-        print(f"             {_GRAY}({format_number(op['flops'])} FLOPs){_END}")
-        
+        print(
+            f"    Compute: {color}{compute_time_ms:.3f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
+        )
+        print(f"             {_GRAY}({format_number(float(op['flops']))} FLOPs){_END}")
+
         # Memory bandwidth metrics in a compact format
-        print(f"    Memory:  Input: {op['input_bytes'] / 1e9:.2f} GB ({op['input_time_ms']:.3f} ms)")
-        print(f"             Weight: {op['weight_bytes'] / 1e9:.2f} GB ({op['weight_time_ms']:.3f} ms)")
-        print(f"             Output: {op['output_bytes'] / 1e9:.2f} GB ({op['output_time_ms']:.3f} ms)")
-    
+        input_bytes = op["input_bytes"]
+        weight_bytes = op["weight_bytes"]
+        output_bytes = op["output_bytes"]
+        input_time_ms = op["input_time_ms"]
+        weight_time_ms = op["weight_time_ms"]
+        output_time_ms = op["output_time_ms"]
+
+        print(f"    Memory:  Input: {input_bytes / 1e9:.2f} GB ({input_time_ms:.3f} ms)")
+        print(f"             Weight: {weight_bytes / 1e9:.2f} GB ({weight_time_ms:.3f} ms)")
+        print(f"             Output: {output_bytes / 1e9:.2f} GB ({output_time_ms:.3f} ms)")
+
     print()
     print_metric("Total GEMM Compute", f"{total_compute_time_ms:.2f}", "ms", highlight=True)
 
@@ -477,18 +498,18 @@ def main() -> None:
     )
 
     # SDPA time
-    n_heads_per_tp_partition = model_repr.n_q_heads // model_repr.parallelism_cfg.tp
-    sdpa_flops = sum(
+    sdpa_flops = safe_divide(model_repr.n_q_heads, model_repr.parallelism_cfg.tp) * sum(
         [
             # Q @ K.T
-            2 * n_heads_per_tp_partition * sequence_len * model_repr.head_dim * sequence_len,
+            2
+            * safe_divide(sequence_len, model_repr.parallelism_cfg.cp)
+            * model_repr.head_dim
+            * sequence_len,
             # A @ V
-            2 * n_heads_per_tp_partition * sequence_len * sequence_len * model_repr.head_dim,
+            2 * sequence_len * sequence_len * model_repr.head_dim,
         ]
     )
-    sdpa_time = (sdpa_flops // model_repr.parallelism_cfg.cp) / (
-        machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL
-    )
+    sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
     if model_repr.moe_cfg is not None:
         assert model_repr.parallelism_cfg.expert_mesh is not None
@@ -499,10 +520,11 @@ def main() -> None:
             model_repr.parallelism_cfg.expert_mesh.ep,
         )
 
-        print(f"expert capacity: {expert_capacity}")
-
         def compute_expert_gemm_time_s(n_tokens_per_expert: int, weight_repr: TensorRepr) -> float:
             n_local_experts, *gemm_dims = weight_repr.shape(partitioned=True)
+            print(
+                f"n_local_experts: {n_local_experts} n_tokens: {n_tokens_per_expert} gemm_dims: {gemm_dims}"
+            )
             flops = n_local_experts * compute_gemm_flops(
                 n_tokens=n_tokens_per_expert,
                 weight_shape=tuple(gemm_dims),
