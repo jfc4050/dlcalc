@@ -3,11 +3,10 @@
 <div align="center">
 
 [![PyPI version](https://badge.fury.io/py/dlcalc.svg)](https://badge.fury.io/py/dlcalc)
-[![Python](https://img.shields.io/pypi/pyversions/dlcalc.svg)](https://pypi.org/project/dlcalc/)
 ![checks](https://github.com/jfc4050/dlcalc/actions/workflows/python-app.yml/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**High-performance command-line tools for deep learning infrastructure optimization**
+**command-line tools for deep learning optimization**
 
 [Installation](#-installation) • [Tools](#-tools) • [Contributing](#-contributing)
 
