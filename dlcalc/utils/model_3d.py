@@ -481,12 +481,20 @@ class ThreeDParallelModel:
         https://arxiv.org/pdf/2205.05198.pdf
         """
         sbh = self.sequence_len * self.microbatch_sz * self.hidden_sz
-        sbi = self.sequence_len * self.microbatch_sz * self.inter_sz
         sbq = self.sequence_len * self.microbatch_sz * self.n_q_heads * self.head_dim
         sbk = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
         sbv = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
 
-        sbi_exp = self.sequence_len * self.microbatch_sz * self.moe_cfg.expert_inter_sz if self.moe_cfg else 0
+        n_local_mlps = (
+            1
+            if self.moe_cfg is None
+            else safe_divide(self.moe_cfg.n_experts, self.parallelism_cfg.expert_mesh.ep)
+        )
+        sbi = (
+            self.sequence_len * self.microbatch_sz * self.inter_sz
+            if self.moe_cfg is None
+            else self.expert_capacity() * self.moe_cfg.expert_inter_sz
+        )
 
         if self.act_ckpting_type == ActivationCheckpointingType.FULL:
             return self.__sp_partition_if_on(sbh)  # just the block input
@@ -517,7 +525,7 @@ class ThreeDParallelModel:
                 # TODO.
                 # output is recomputed
                 # MLP UP/GATE (col parallel linear)
-                self.__tp_partition(16 * 2 * sbi_exp if self.glu else sbi),  # SwiGLU input
+                n_local_mlps * self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
                 # SwiGLU
                 # TODO. swiglu output
                 # MLP DOWN (row parallel linear)
@@ -555,101 +563,7 @@ class ThreeDParallelModel:
                 # LAYERNORM 2
                 self.__sp_partition_if_on(sbh),  # up/gate input
                 # MLP UP/GATE (col parallel linear)
-                self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
-                # SwiGLU
-                self.__tp_partition(sbi),  # SiLU output
-                self.__tp_partition(sbi),  # gate output
-                # MLP DOWN (row parallel linear)
-                # - output deallocated - dropout doesn't need to store
-                # DROPOUT
-                self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0,  # dropout mask
-                # - output deallocated - residual doesn't need to store
-                # RESIDUAL
-                # input to next norm1, resid1
-                self.__sp_partition_if_on(sbh),
-            )
-        elif self.act_ckpting_type == ActivationCheckpointingType.NONE:
-            raise NotImplementedError(
-                "not yet implemented. selective will give a good approximation "
-                "if you use flash attention"
-            )
-        else:
-            raise ValueError(f"unhandled checkpointing_type={self.act_ckpting_type}")
-
-    # TODO. probably needs to be adjusted for MoE
-    def __moe_activation_numel_per_microbatch_per_layer(self) -> int:
-        """
-        See: Reducing Activation Recomputation in Large Transformer Models
-        https://arxiv.org/pdf/2205.05198.pdf
-        """
-        sbh = self.sequence_len * self.microbatch_sz * self.hidden_sz
-        sbi = self.sequence_len * self.microbatch_sz * self.inter_sz
-        sbq = self.sequence_len * self.microbatch_sz * self.n_q_heads * self.head_dim
-        sbk = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
-        sbv = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
-
-        if self.act_ckpting_type == ActivationCheckpointingType.FULL:
-            return self.__sp_partition_if_on(sbh)  # just the block input
-        elif self.act_ckpting_type == ActivationCheckpointingType.SUPER_SELECTIVE:
-            return _sum(
-                # LAYERNORM 1
-                # - output is recomputed
-                # QKV (col parallel linear)
-                self.__tp_partition(sbq),  # Q - attn input
-                self.__tp_partition(sbk),  # K - attn input
-                self.__tp_partition(sbv),  # V - attn input
-                # ROTARY EMBEDDINGS
-                self.__tp_partition(sbq) if self.rotary_embed else 0,  # Q rotary
-                self.__tp_partition(sbk) if self.rotary_embed else 0,  # K rotary
-                # SELF ATTENTION
-                # - skipping intermediates (checkpointed by FlashAttention)
-                self.__tp_partition(sbh),  # attn output
-                # DOWN PROJ
-                # - output deallocated (dropout doesn't need to store)
-                # DROPOUT
-                # - dropout mask recomputed
-                # - deallocated - residual doesn't need to store
-                # RESIDUAL
-                self.__sp_partition_if_on(sbh),  # stored by norm2, residual2
-                # LAYERNORM 2
-                # output is recomputed
-                # MLP UP/GATE (col parallel linear)
-                self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
-                # SwiGLU
-                # - output is recomputed
-                # MLP DOWN (row parallel linear)
-                # - output deallocated - dropout doesn't need to store
-                # DROPOUT
-                # - dropout mask recomputed
-                # - output deallocated - residual doesn't need to store
-                # RESIDUAL
-                self.__sp_partition_if_on(sbh),  # needed by next norm1, residual1
-            )
-        elif self.act_ckpting_type == ActivationCheckpointingType.SELECTIVE:
-            return _sum(
-                # LAYERNORM 1
-                self.__sp_partition_if_on(sbh),  # output - QKV input
-                # QKV PROJ (col parallel linear)
-                self.__tp_partition(sbq),  # Q - attn input
-                self.__tp_partition(sbk),  # K - attn input
-                self.__tp_partition(sbv),  # V - attn input
-                # ROTARY EMBEDDINGS
-                self.__tp_partition(sbq) if self.rotary_embed else 0,  # Q rotary
-                self.__tp_partition(sbk) if self.rotary_embed else 0,  # K rotary
-                # SELF ATTENTION
-                # - skipping intermediates (checkpointed by FlashAttention)
-                self.__tp_partition(sbh),  # needed by down proj
-                # DOWN PROJ
-                # - output deallocated (dropout doesn't need to store)
-                # DROPOUT
-                self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0,  # dropout mask
-                # -  output deallocated: residual doesn't need to store
-                # RESIDUAL
-                self.__sp_partition_if_on(sbh),  # needed by norm2, resid2
-                # LAYERNORM 2
-                self.__sp_partition_if_on(sbh),  # up/gate input
-                # MLP UP/GATE (col parallel linear)
-                self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
+                n_local_mlps * self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
                 # SwiGLU
                 self.__tp_partition(sbi),  # SiLU output
                 self.__tp_partition(sbi),  # gate output
@@ -687,3 +601,20 @@ class ThreeDParallelModel:
             x = safe_divide(x, parallelism_degree)
 
         return x
+
+    def expert_capacity(self) -> int:
+        """Returns the number of tokens that can be processed by each expert."""
+        if self.moe_cfg is None:
+            raise RuntimeError
+        assert self.parallelism_cfg.expert_mesh is not None
+
+        return safe_divide(
+            int(
+                self.sequence_len
+                * self.microbatch_sz
+                * self.moe_cfg.experts_per_token
+                * self.parallelism_cfg.expert_mesh.ep
+                * self.moe_cfg.capacity_factor
+            ),
+            self.moe_cfg.n_experts,
+        )

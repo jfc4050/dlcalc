@@ -418,16 +418,7 @@ def main() -> None:
     if model_repr.moe_cfg is not None:
         assert model_repr.parallelism_cfg.expert_mesh is not None
 
-        expert_capacity = (
-            int(
-                model_repr.microbatch_sz
-                * model_repr.sequence_len
-                * model_repr.moe_cfg.experts_per_token  # or k in other words
-                * model_repr.parallelism_cfg.expert_mesh.ep
-                * model_repr.moe_cfg.capacity_factor
-            )
-            // model_repr.moe_cfg.n_experts
-        )
+        expert_capacity = model_repr.expert_capacity()
         n_local_experts = safe_divide(
             model_repr.moe_cfg.n_experts,
             model_repr.parallelism_cfg.expert_mesh.ep,
@@ -546,6 +537,7 @@ def main() -> None:
     )
     pipeline_bubble_time = transformer_block_time * pipeline_bubble_fraction
 
+    # TODO. these are wrong for MoE
     dp_ag_time = param_bucket_all_gather_time_s * n_buckets
     dp_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets
 
