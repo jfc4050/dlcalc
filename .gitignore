@@ -11,3 +11,13 @@ build/
 # uv
 .venv/
 uv.lock
+
+# coverage
+.coverage
+.coverage.*
+htmlcov/
+*.cover
+.hypothesis/
+.pytest_cache/
+coverage.xml
+*.py,cover
