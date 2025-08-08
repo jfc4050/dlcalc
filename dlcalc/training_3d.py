@@ -374,9 +374,11 @@ def main() -> None:
         raise NotImplementedError
     else:
         # TODO. we need to fix these to account for EP and CP.
-        ###############################################################################
-        # compute the backward time for a single microbatch.
-        ###############################################################################
+        
+        # Microbatch compute times
+        print_section_separator()
+        print_info("Microbatch Compute Times (100% FLOPS utilization)")
+        
         devices_in_pp_stage_flops = (
             model_repr.parallelism_cfg.tp * machine_spec.device_spec.peak_flops
         )
@@ -389,20 +391,17 @@ def main() -> None:
         single_microbatch_bwd_time = (
             model_repr.get_single_microbatch_bwd_flops() / devices_in_pp_stage_flops
         )
-        print(
-            f"single PP rank: (if 100% FLOPs utilization):\n"
-            f"* single microbatch fwd compute time {single_microbatch_fwd_time * 1000:.3f} ms\n"
-            f"* single microbatch bwd compute time {single_microbatch_bwd_time * 1000:.3f} ms"
-        )
-        print()
+        
+        print_kv("Forward Pass", f"{single_microbatch_fwd_time * 1000:.3f} ms")
+        print_kv("Backward Pass", f"{single_microbatch_bwd_time * 1000:.3f} ms")
 
-        ###############################################################################
-        # DP comm times
-        ###############################################################################
+        # Gradient bucketing configuration
+        print_section_separator()
+        print_info("Gradient Bucketing")
+        
         # grads are reduced in full-precision
         # params are all-gathered in half-precision
         mp_params_size = model_repr.states.params_shard.size(partitioned=True)
-        print(f"params per MP degree: {mp_params_size}")
         # TODO. precisions here assume we are doing AMP
         grad_bucket_numel = model_repr.grad_bucket_numel()
         grad_bucket_size = Size(
@@ -414,8 +413,10 @@ def main() -> None:
             bits_per_element=model_repr.bits_per_parameter,
         )
         n_buckets = mp_params_size.numel() / grad_bucket_numel
-        print(f"reduce_scatter/all_gather n_buckets = ceil({n_buckets})")
-        print()
+        
+        print_kv("Params per MP rank", str(mp_params_size))
+        print_kv("Bucket Size", f"{format_number(grad_bucket_numel)} params")
+        print_kv("Number of Buckets", f"{math.ceil(n_buckets)}")
         # full BW should be divided along all MP ranks within a single node, since
         # they are each participating in their own DP collectives. We make the
         # assumption here that TP is the only form of MP we do within node.
@@ -433,12 +434,15 @@ def main() -> None:
             parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
-        print(
-            f"reduce_scatter(1_grad_bucket):\n"
-            f"\tlatency term = {grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms\n"
-            f"\tbw term = {grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms (if 100% BW utilization)\n"
-            f"\tTOTAL = {grad_bucket_reduce_scatter_time_s * 1000:.3f} ms\n"
-        )
+        # Communication breakdown per bucket
+        print_section_separator()
+        print_info("Communication Breakdown (per bucket)")
+        
+        print(f"\n  {_BOLD}Reduce-Scatter (Gradients){_END}")
+        print_kv("  Latency", f"{grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms", key_width=15)
+        print_kv("  Bandwidth", f"{grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms", key_width=15)
+        print_metric("  Total", f"{grad_bucket_reduce_scatter_time_s * 1000:.3f}", "ms", highlight=True)
+        
         param_bucket_all_gather_lat_term_s = get_dp_all_gather_latency_term_s(
             parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
@@ -453,21 +457,22 @@ def main() -> None:
             parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
-        print(
-            f"all_gather(1_param_bucket):\n"
-            f"\tlatency term = {param_bucket_all_gather_lat_term_s * 1000:.3f} ms\n"
-            f"\tbw term = {param_bucket_all_gather_bw_term_s * 1000:.3f} ms (if 100% BW utilization)\n"
-            f"\tTOTAL = {param_bucket_all_gather_time_s * 1000:.3f} ms\n"
-        )
+        
+        print(f"\n  {_BOLD}All-Gather (Parameters){_END}")
+        print_kv("  Latency", f"{param_bucket_all_gather_lat_term_s * 1000:.3f} ms", key_width=15)
+        print_kv("  Bandwidth", f"{param_bucket_all_gather_bw_term_s * 1000:.3f} ms", key_width=15)
+        print_metric("  Total", f"{param_bucket_all_gather_time_s * 1000:.3f}", "ms", highlight=True)
 
-        print(
-            f"reduce_scatter(all_grad_buckets) time = {grad_bucket_reduce_scatter_time_s * n_buckets * 1000:.3f} ms "
-            f"(if 100% BW utilization)"
-        )
-        print(
-            f"all_gather(all_param_buckets) time = {param_bucket_all_gather_time_s * n_buckets * 1000:.3f} ms "
-            f"(if 100% BW utilization)"
-        )
+        # Total communication times
+        print_section_separator()
+        print_info("Total Communication Time (all buckets)")
+        
+        total_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets * 1000
+        total_ag_time = param_bucket_all_gather_time_s * n_buckets * 1000
+        
+        print_kv("Reduce-Scatter Total", f"{total_rs_time:.2f} ms")
+        print_kv("All-Gather Total", f"{total_ag_time:.2f} ms")
+        print_metric("Combined DP Comm", f"{total_rs_time + total_ag_time:.2f}", "ms", highlight=True)
 
     ##################################################################################
     # Iteration Time
