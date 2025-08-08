@@ -418,17 +418,19 @@ def main() -> None:
     if model_repr.moe_cfg is not None:
         assert model_repr.parallelism_cfg.expert_mesh is not None
 
-        # this is the total (i.e. unpartitioned) number of tokens received by each expert
-        # note: this is done per "global microbatch" which means that in addition to token
-        # partitioning parallelism impacting routing decisions, microbatching does as well.
         expert_capacity = (
             int(
-                (model_repr.microbatch_sz * model_repr.parallelism_cfg.dp)
+                model_repr.microbatch_sz
                 * model_repr.sequence_len
                 * model_repr.moe_cfg.experts_per_token  # or k in other words
+                * model_repr.parallelism_cfg.expert_mesh.ep
                 * model_repr.moe_cfg.capacity_factor
             )
             // model_repr.moe_cfg.n_experts
+        )
+        n_local_experts = safe_divide(
+            model_repr.moe_cfg.n_experts,
+            model_repr.parallelism_cfg.expert_mesh.ep,
         )
 
         print(f"expert capacity: {expert_capacity}")
@@ -441,53 +443,21 @@ def main() -> None:
             )
             return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
-        token_partition_degree_nonexp = (
-            # pp does not partition tokens
-            model_repr.parallelism_cfg.dp  # partition along batch
-            # ep does not partition tokens
-            * model_repr.parallelism_cfg.cp  # partition along sequence
-            * model_repr.parallelism_cfg.tp  # partition along sequence (SP)
-        )
-        # EP parallelism comes from one or more of the token partitioning dimensions,
-        # so we have less token partitioning in the expert region.
-        # token_partition_degree_exp * EP = token_partition_degree_nonexp
-        token_partition_degree_exp = safe_divide(
-            token_partition_degree_nonexp, model_repr.parallelism_cfg.expert_mesh.ep
-        )
-
-        n_tokens_per_token_partition_nonexp = safe_divide(
-            expert_capacity * model_repr.moe_cfg.n_experts,
-            token_partition_degree_nonexp,
-        )
-        print("n_tokens_per_token_partition_nonexp:", n_tokens_per_token_partition_nonexp)
-
         # the alltoall will trade token partitioning along the capacity dimension
         # for token partitioning along the experts dimension. i.e. we'll go from:
         # (capacity / prod(token_partitioning_degrees_exp) / EP, n_experts) to
         # (capacity / prod(token_partitioning_degrees_exp), n_experts / EP)
         a2a_time_s = get_all_to_all_comm_time_s(
             size=Size(
-                n_tokens_per_token_partition_nonexp * hidden_sz,
+                expert_capacity * hidden_sz,
                 bits_per_element=model_repr.bits_per_parameter,
             ),
             parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
 
-        n_tokens_per_token_partition_exp = safe_divide(
-            expert_capacity
-            * safe_divide(
-                model_repr.moe_cfg.n_experts,
-                model_repr.parallelism_cfg.expert_mesh.ep,
-            ),
-            token_partition_degree_exp,
-        )
-        expert_region_n_tokens = (
-            n_tokens_per_token_partition_exp * model_repr.moe_cfg.expert_tp_degree
-        )
-
         expert_activation_size = Size(
-            numel=expert_region_n_tokens * model_repr.hidden_sz,
+            numel=n_local_experts * expert_capacity * model_repr.hidden_sz,
             bits_per_element=model_repr.bits_per_parameter,
         )
 
@@ -520,24 +490,12 @@ def main() -> None:
             pre_mlp_a2a=a2a_time_s,
             pre_mlp_ag=expert_ag_time_s,
             mlp_up_proj=compute_expert_gemm_time_s(
-                n_tokens_per_expert=safe_divide(
-                    expert_region_n_tokens,
-                    safe_divide(
-                        model_repr.moe_cfg.n_experts,
-                        model_repr.parallelism_cfg.expert_mesh.ep,
-                    ),
-                ),
+                n_tokens_per_expert=expert_capacity,
                 weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
             ),
             # TODO. GLU Activation
             mlp_down_proj=compute_expert_gemm_time_s(
-                n_tokens_per_expert=safe_divide(
-                    expert_region_n_tokens,
-                    safe_divide(
-                        model_repr.moe_cfg.n_experts,
-                        model_repr.parallelism_cfg.expert_mesh.ep,
-                    ),
-                ),
+                n_tokens_per_expert=expert_capacity,
                 weight_repr=model_repr.mlp_down_exp_weight,  # type: ignore[arg-type]
             ),
             post_mlp_rs=expert_rs_time_s,

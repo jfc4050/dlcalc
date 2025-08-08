@@ -486,6 +486,8 @@ class ThreeDParallelModel:
         sbk = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
         sbv = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
 
+        sbi_exp = self.sequence_len * self.microbatch_sz * self.moe_cfg.expert_inter_sz if self.moe_cfg else 0
+
         if self.act_ckpting_type == ActivationCheckpointingType.FULL:
             return self.__sp_partition_if_on(sbh)  # just the block input
         elif self.act_ckpting_type == ActivationCheckpointingType.SUPER_SELECTIVE:
@@ -515,7 +517,7 @@ class ThreeDParallelModel:
                 # TODO.
                 # output is recomputed
                 # MLP UP/GATE (col parallel linear)
-                self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
+                self.__tp_partition(16 * 2 * sbi_exp if self.glu else sbi),  # SwiGLU input
                 # SwiGLU
                 # TODO. swiglu output
                 # MLP DOWN (row parallel linear)
