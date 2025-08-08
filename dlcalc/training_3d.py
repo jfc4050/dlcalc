@@ -274,7 +274,9 @@ def main() -> None:
     print()
 
     print_h1_header("COMMUNICATION: TENSOR PARALLELISM")
-    # TODO. assumes SP, analysis pretty similar if not SP though
+    if not model_repr.parallelism_cfg.sp_enabled:
+        raise NotImplementedError("not implemented for non-SP case")
+
     activation_size = Size(
         numel=safe_divide(sequence_len, model_repr.parallelism_cfg.cp) * microbatch_sz * hidden_sz,
         bits_per_element=model_repr.bits_per_parameter,
@@ -533,7 +535,14 @@ def main() -> None:
                 n_tokens_per_expert=expert_capacity,
                 weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
             ),
-            # TODO. GLU Activation
+            glu_act=3  # read 2, write 1
+            * (
+                n_local_experts
+                * expert_capacity
+                * model_repr.moe_cfg.expert_inter_sz
+                * safe_divide(model_repr.bits_per_parameter, 8)
+            )
+            / machine_spec.device_spec.mem_bandwidth_bytes_per_sec,
             mlp_down_proj=compute_expert_gemm_time_s(
                 n_tokens_per_expert=expert_capacity,
                 weight_repr=model_repr.mlp_down_exp_weight,  # type: ignore[arg-type]
