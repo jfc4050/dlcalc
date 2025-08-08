@@ -4,7 +4,6 @@ import json
 import math
 from argparse import ArgumentParser
 from collections import OrderedDict
-from typing import Any, Dict
 
 import yaml
 
@@ -193,12 +192,16 @@ def main() -> None:
     ###################################################################################
     print_h1_header("COMPUTE: GEMM OPERATIONS")
     print_info("Note: Numbers calculated assuming 100% FLOPS and bandwidth utilization")
+    n_tokens_cp = (
+        safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
+        * model_repr.microbatch_sz
+    )
     projections = OrderedDict(
         {
-            "QKV": model_repr.qkv_weight,
-            "ATTN_OUT": model_repr.attn_out_weight,
-            "MLP1": model_repr.mlp_up_weight,
-            "MLP2": model_repr.mlp_down_weight,
+            "QKV Projection": (model_repr.qkv_weight, n_tokens_cp),
+            "Attention Combine Projection": (model_repr.attn_out_weight, n_tokens_cp),
+            "MLP Up Projection": (model_repr.mlp_up_weight, n_tokens_cp),
+            "MLP Down Projection": (model_repr.mlp_down_weight, n_tokens_cp),
         }
     )
 
@@ -209,10 +212,13 @@ def main() -> None:
             k - 1: v for k, v in model_repr.mlp_up_exp_weight._partition_spec.items() if k != 0
         }
 
-        projections["MLP1_EXP"] = TensorRepr(
-            unpartitioned_shape=single_expert_shape,
-            partition_spec=single_expert_partition_spec,
-            bits_per_elt=model_repr.bits_per_parameter,
+        projections["MLP Up (Expert)"] = (
+            TensorRepr(
+                unpartitioned_shape=single_expert_shape,
+                partition_spec=single_expert_partition_spec,
+                bits_per_elt=model_repr.bits_per_parameter,
+            ),
+            model_repr.expert_capacity(),
         )
     if model_repr.mlp_down_exp_weight is not None:
         expert_dim, *other_dims = model_repr.mlp_down_exp_weight.shape(partitioned=False)
@@ -221,82 +227,21 @@ def main() -> None:
             k - 1: v for k, v in model_repr.mlp_down_exp_weight._partition_spec.items() if k != 0
         }
 
-        projections["MLP2_EXP"] = TensorRepr(
-            unpartitioned_shape=single_expert_shape,
-            partition_spec=single_expert_partition_spec,
-            bits_per_elt=model_repr.bits_per_parameter,
+        projections["MLP Down (Expert)"] = (
+            TensorRepr(
+                unpartitioned_shape=single_expert_shape,
+                partition_spec=single_expert_partition_spec,
+                bits_per_elt=model_repr.bits_per_parameter,
+            ),
+            model_repr.expert_capacity(),
         )
 
-    # Collect all GEMM operations data first
-    gemm_operations: list[Dict[str, Any]] = []
-    total_compute_time_ms = 0.0
-
-    for proj_name, weight_repr in projections.items():
-        weight_repr: TensorRepr  # type: ignore[no-redef]
+    for proj_name, (weight_repr, n_tokens) in projections.items():
         flops = compute_gemm_flops(
-            n_tokens=safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
-            * model_repr.microbatch_sz,
+            n_tokens=n_tokens,
             weight_shape=weight_repr.shape(partitioned=True),
         )
-
         compute_time_ms = flops / machine_spec.device_spec.peak_flops * 1000
-        total_compute_time_ms += compute_time_ms
-
-        bytes_per_element = model_repr.bits_per_parameter // 8
-        gemm_input_dim, gemm_output_dim = weight_repr.shape(partitioned=True)
-        weight_bytes = bytes_per_element * weight_repr.numel(partitioned=True)
-        input_bytes = (
-            bytes_per_element
-            * safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
-            * model_repr.microbatch_sz
-            * gemm_input_dim
-        )
-        output_bytes = (
-            bytes_per_element
-            * safe_divide(model_repr.sequence_len, model_repr.parallelism_cfg.cp)
-            * model_repr.microbatch_sz
-            * gemm_output_dim
-        )
-
-        input_time_ms = input_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
-        weight_time_ms = weight_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
-        output_time_ms = output_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
-
-        gemm_operations.append(
-            {
-                "name": proj_name,
-                "weight_repr": weight_repr,
-                "flops": flops,
-                "compute_time_ms": compute_time_ms,
-                "input_bytes": input_bytes,
-                "input_time_ms": input_time_ms,
-                "weight_bytes": weight_bytes,
-                "weight_time_ms": weight_time_ms,
-                "output_bytes": output_bytes,
-                "output_time_ms": output_time_ms,
-            }
-        )
-
-    # Display GEMM operations with better formatting
-    for op in gemm_operations:
-        compute_time_ms = float(op["compute_time_ms"])
-        percentage = (
-            (compute_time_ms / total_compute_time_ms) * 100 if total_compute_time_ms > 0 else 0
-        )
-        bar_length = int(percentage / 2)
-        bar = "█" * bar_length
-
-        # Format operation name nicely
-        op_name_map = {
-            "QKV": "QKV Projection",
-            "ATTN_OUT": "Attention Output",
-            "MLP1": "MLP Up Projection",
-            "MLP2": "MLP Down Projection",
-            "MLP1_EXP": "MLP Up (Expert)",
-            "MLP2_EXP": "MLP Down (Expert)",
-        }
-        op_name_str = str(op["name"])
-        op_name_formatted = op_name_map.get(op_name_str, op_name_str)
 
         # Color based on compute intensity
         if compute_time_ms > 0.5:
@@ -306,32 +251,29 @@ def main() -> None:
         else:
             color = "\033[92m"  # Green for light
 
-        op_weight_repr: TensorRepr = op["weight_repr"]  # type: ignore[assignment]
-        print(f"\n  {_BOLD}{op_name_formatted}{_END}")
+        print(f"\n  {_BOLD}{proj_name}{_END}")
         print(
-            f"    Shape: {op_weight_repr.shape(partitioned=False)} → {op_weight_repr.shape(partitioned=True)}"
+            f"    Shape: {weight_repr.shape(partitioned=False)} → Partitioned: {weight_repr.shape(partitioned=True)}"
         )
 
         # Compute metrics with bar
-        print(
-            f"    Compute: {color}{compute_time_ms:.3f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
-        )
-        print(f"             {_GRAY}({format_number(float(op['flops']))} FLOPs){_END}")
+        print(f"    Compute: {color}{compute_time_ms:.3f} ms{_END}")
+        print(f"             {_GRAY}({format_number(float(flops))} FLOPs){_END}")
 
         # Memory bandwidth metrics in a compact format
-        input_bytes = op["input_bytes"]
-        weight_bytes = op["weight_bytes"]
-        output_bytes = op["output_bytes"]
-        input_time_ms = op["input_time_ms"]
-        weight_time_ms = op["weight_time_ms"]
-        output_time_ms = op["output_time_ms"]
-
+        bytes_per_element = safe_divide(model_repr.bits_per_parameter, 8)
+        gemm_input_dim, gemm_output_dim = weight_repr.shape(partitioned=True)
+        weight_bytes = bytes_per_element * weight_repr.numel(partitioned=True)
+        input_bytes = n_tokens * gemm_input_dim * bytes_per_element
+        output_bytes = n_tokens * gemm_output_dim * bytes_per_element
+        input_time_ms = input_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
+        weight_time_ms = weight_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
+        output_time_ms = output_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
         print(f"    Memory:  Input: {input_bytes / 1e9:.2f} GB ({input_time_ms:.3f} ms)")
         print(f"             Weight: {weight_bytes / 1e9:.2f} GB ({weight_time_ms:.3f} ms)")
         print(f"             Output: {output_bytes / 1e9:.2f} GB ({output_time_ms:.3f} ms)")
 
     print()
-    print_metric("Total GEMM Compute", f"{total_compute_time_ms:.2f}", "ms", highlight=True)
 
     print_h1_header("COMMUNICATION: TENSOR PARALLELISM")
     # TODO. assumes SP, analysis pretty similar if not SP though
@@ -374,11 +316,11 @@ def main() -> None:
         raise NotImplementedError
     else:
         # TODO. we need to fix these to account for EP and CP.
-        
+
         # Microbatch compute times
         print_section_separator()
         print_info("Microbatch Compute Times (100% FLOPS utilization)")
-        
+
         devices_in_pp_stage_flops = (
             model_repr.parallelism_cfg.tp * machine_spec.device_spec.peak_flops
         )
@@ -391,14 +333,14 @@ def main() -> None:
         single_microbatch_bwd_time = (
             model_repr.get_single_microbatch_bwd_flops() / devices_in_pp_stage_flops
         )
-        
+
         print_kv("Forward Pass", f"{single_microbatch_fwd_time * 1000:.3f} ms")
         print_kv("Backward Pass", f"{single_microbatch_bwd_time * 1000:.3f} ms")
 
         # Gradient bucketing configuration
         print_section_separator()
         print_info("Gradient Bucketing")
-        
+
         # grads are reduced in full-precision
         # params are all-gathered in half-precision
         mp_params_size = model_repr.states.params_shard.size(partitioned=True)
@@ -413,7 +355,7 @@ def main() -> None:
             bits_per_element=model_repr.bits_per_parameter,
         )
         n_buckets = mp_params_size.numel() / grad_bucket_numel
-        
+
         print_kv("Params per MP rank", str(mp_params_size))
         print_kv("Bucket Size", f"{format_number(grad_bucket_numel)} params")
         print_kv("Number of Buckets", f"{math.ceil(n_buckets)}")
@@ -437,12 +379,18 @@ def main() -> None:
         # Communication breakdown per bucket
         print_section_separator()
         print_info("Communication Breakdown (per bucket)")
-        
+
         print(f"\n  {_BOLD}Reduce-Scatter (Gradients){_END}")
-        print_kv("  Latency", f"{grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms", key_width=15)
-        print_kv("  Bandwidth", f"{grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms", key_width=15)
-        print_metric("  Total", f"{grad_bucket_reduce_scatter_time_s * 1000:.3f}", "ms", highlight=True)
-        
+        print_kv(
+            "  Latency", f"{grad_bucket_reduce_scatter_lat_term_s * 1000:.3f} ms", key_width=15
+        )
+        print_kv(
+            "  Bandwidth", f"{grad_bucket_reduce_scatter_bw_term_s * 1000:.3f} ms", key_width=15
+        )
+        print_metric(
+            "  Total", f"{grad_bucket_reduce_scatter_time_s * 1000:.3f}", "ms", highlight=True
+        )
+
         param_bucket_all_gather_lat_term_s = get_dp_all_gather_latency_term_s(
             parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
@@ -457,22 +405,26 @@ def main() -> None:
             parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,
         )
-        
+
         print(f"\n  {_BOLD}All-Gather (Parameters){_END}")
         print_kv("  Latency", f"{param_bucket_all_gather_lat_term_s * 1000:.3f} ms", key_width=15)
         print_kv("  Bandwidth", f"{param_bucket_all_gather_bw_term_s * 1000:.3f} ms", key_width=15)
-        print_metric("  Total", f"{param_bucket_all_gather_time_s * 1000:.3f}", "ms", highlight=True)
+        print_metric(
+            "  Total", f"{param_bucket_all_gather_time_s * 1000:.3f}", "ms", highlight=True
+        )
 
         # Total communication times
         print_section_separator()
         print_info("Total Communication Time (all buckets)")
-        
+
         total_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets * 1000
         total_ag_time = param_bucket_all_gather_time_s * n_buckets * 1000
-        
+
         print_kv("Reduce-Scatter Total", f"{total_rs_time:.2f} ms")
         print_kv("All-Gather Total", f"{total_ag_time:.2f} ms")
-        print_metric("Combined DP Comm", f"{total_rs_time + total_ag_time:.2f}", "ms", highlight=True)
+        print_metric(
+            "Combined DP Comm", f"{total_rs_time + total_ag_time:.2f}", "ms", highlight=True
+        )
 
     ##################################################################################
     # Iteration Time
@@ -550,17 +502,6 @@ def main() -> None:
             bits_per_element=model_repr.bits_per_parameter,
         )
 
-        expert_ag_time_s = get_expert_tp_all_gather_comm_time_s(
-            size=expert_activation_size,
-            parallel_config=model_repr.parallelism_cfg,
-            machine_spec=machine_spec,
-        )
-        expert_rs_time_s = get_expert_tp_reduce_scatter_comm_time_s(
-            size=expert_activation_size,
-            parallel_config=model_repr.parallelism_cfg,
-            machine_spec=machine_spec,
-        )
-
         transformer_block_time_components: dict[str, float] = OrderedDict(
             # Attention
             pre_attn_norm=hbm_load_store_time_s,  # norm approximation
@@ -577,7 +518,11 @@ def main() -> None:
             # bunch of router operations that are hard to project and
             # are highly implementation dependent.
             pre_mlp_a2a=a2a_time_s,
-            pre_mlp_ag=expert_ag_time_s,
+            pre_mlp_ag=get_expert_tp_all_gather_comm_time_s(
+                size=expert_activation_size,
+                parallel_config=model_repr.parallelism_cfg,
+                machine_spec=machine_spec,
+            ),
             mlp_up_proj=compute_expert_gemm_time_s(
                 n_tokens_per_expert=expert_capacity,
                 weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
@@ -587,7 +532,11 @@ def main() -> None:
                 n_tokens_per_expert=expert_capacity,
                 weight_repr=model_repr.mlp_down_exp_weight,  # type: ignore[arg-type]
             ),
-            post_mlp_rs=expert_rs_time_s,
+            post_mlp_rs=get_expert_tp_reduce_scatter_comm_time_s(
+                size=expert_activation_size,
+                parallel_config=model_repr.parallelism_cfg,
+                machine_spec=machine_spec,
+            ),
             post_mlp_a2a=a2a_time_s,
             post_mlp_residual=hbm_load_store_time_s,
             activation_send=activation_send_time_s,
@@ -731,7 +680,7 @@ def main() -> None:
 
     mfu_percentage = (ideal_iteration_time / iteration_time_s) * 100
     print()
-    print_success(f"Predicted MFU: {mfu_percentage:.2f}%")
+    print_success(f"Theoretical MFU: {mfu_percentage:.2f}%")
     print()
 
 
