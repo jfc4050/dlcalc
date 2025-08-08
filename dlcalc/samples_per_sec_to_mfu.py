@@ -1,7 +1,22 @@
-"""simple utility to convert samples/second to MFU."""
+"""Utility to convert samples/second to MFU (Model FLOPs Utilization)."""
 
 import re
 from argparse import ArgumentParser
+
+from dlcalc.utils.printing import (
+    _GRAY,
+    _GREEN,
+    _RED,
+    _YELLOW,
+    format_number,
+    print_h1_header,
+    print_info,
+    print_kv,
+    print_metric,
+    print_section_separator,
+    print_success,
+    print_warning,
+)
 
 n_params_pattern = re.compile(r"([\d\.]+)([a-z])")
 n_accelerators_pattern = re.compile(r"(\d+)x(\d+)")
@@ -102,17 +117,52 @@ def main() -> None:
     # tokens/day
     tokens_per_day = tokens_per_sec * 60 * 60 * 24
 
-    print(
-        f"inputs:\n"
-        f"* model size: {model_size * 1e-9:.2f}B parameters\n"
-        f"* sequence length: {tokens_per_sample}\n"
-        f"* training throughput: {samples_per_sec:.2f} samples/second\n"
-        f"* n_accelerators: {n_accelerators}\n"
-        f"* FLOPs/accelerator: {flops_per_accelerator * 1e-12:.2f} TFLOPs\n"
-    )
+    # Input Configuration
+    print_section_separator()
+    print_info("Configuration")
+    print_kv("Model Size", f"{format_number(model_size)} parameters")
+    print_kv("Sequence Length", f"{tokens_per_sample:,} tokens")
+    print_kv("Training Throughput", f"{samples_per_sec:.2f} samples/sec")
+    print_kv("Accelerators", f"{n_accelerators} devices")
+    print_kv("Peak FLOPS/device", f"{flops_per_accelerator * 1e-12:.2f} TFLOPS")
 
-    print(f"{tokens_per_day * 1e-9:.2f}B tokens/day")
-    print(f"{mfu * 100:.2f}% MFU")
+    # Performance Metrics
+    print_section_separator()
+    print_info("Performance Metrics")
+
+    # Tokens per second
+    tokens_display = f"{format_number(tokens_per_sec)} tokens/sec"
+    print_kv("Token Throughput", tokens_display)
+
+    # Tokens per day
+    daily_display = f"{format_number(tokens_per_day)} tokens/day"
+    print_kv("Daily Volume", daily_display)
+
+    # FLOPS metrics
+    print_kv("Achieved FLOPS", f"{achieved_flops * 1e-12:.2f} TFLOPS")
+    print_kv("Theoretical FLOPS", f"{theoretical_flops * 1e-12:.2f} TFLOPS")
+    print_kv("FLOPs per Token", f"{format_number(flops_per_token)}")
+
+    # MFU Result
+    print_section_separator()
+    mfu_percent = mfu * 100
+
+    # Color code and status based on MFU
+    if mfu_percent > 100:
+        print(f"  {_RED}⚠ MFU: {mfu_percent:.2f}% - Check input values!{_GRAY}")
+        print(
+            f"  {_GRAY}(MFU > 100% indicates incorrect parameters or unrealistic throughput){_GRAY}"
+        )
+    elif mfu_percent >= 50:
+        print_success(f"MFU: {mfu_percent:.2f}%")
+    elif mfu_percent >= 30:
+        print_metric("MFU", f"{mfu_percent:.2f}%", highlight=True)
+    elif mfu_percent >= 20:
+        print_warning(f"MFU: {mfu_percent:.2f}%")
+    else:
+        print(f"  {_RED}✗ MFU: {mfu_percent:.2f}%{_GRAY}")
+
+    print()
 
 
 if __name__ == "__main__":
