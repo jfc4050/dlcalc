@@ -173,16 +173,18 @@ def main() -> None:
     layers_per_pp_stage = model_repr.layers_per_pp_stage()
     vpp_multiplier = model_repr.vpp_penalty()
 
-    print_kv("Activation/Layer/Microbatch", str(act_size_per_layer_per_inflight_microbatch))
-    print_kv("Max Inflight Microbatches", str(max_inflight_microbatches))
-    print_kv("Layers per PP Stage", str(layers_per_pp_stage))
-    print_kv("VPP Memory Multiplier", f"{vpp_multiplier:.2f}x")
+    print_kv(
+        "Activation/Layer/Microbatch", str(act_size_per_layer_per_inflight_microbatch), key_width=30
+    )
+    print_kv("Max Inflight Microbatches", str(max_inflight_microbatches), key_width=30)
+    print_kv("Layers per PP Stage", str(layers_per_pp_stage), key_width=30)
+    print_kv("VPP Memory Multiplier", f"{vpp_multiplier:.2f}x", key_width=30)
     act_memory = (
         act_size_per_layer_per_inflight_microbatch
         * min(n_microbatches_per_mp_rank, max_inflight_microbatches)
         * math.ceil(vpp_multiplier * layers_per_pp_stage)
     )
-    print_kv("Total Activation Memory", f"{act_memory.bytes() / (1024**3):.3f} GiB")
+    print_kv("Total Activation Memory", f"{act_memory.bytes() / (1024**3):.3f} GiB", key_width=30)
 
     print_h1_header("MEMORY: SUMMARY")
     total_memory_gib = (model_repr.states.total_bytes(partitioned=True) + act_memory.bytes()) / (
@@ -308,8 +310,8 @@ def main() -> None:
         (1 / vpp) * (model_repr.parallelism_cfg.pp - 1) / n_microbatches_per_mp_rank
     )
 
-    print_kv("VPP Pipeline Bubble Multiplier", f"{(1 / vpp):.2f}x")
-    print_kv("Pipeline Bubble Fraction", f"{pipeline_bubble_fraction:.2%}")
+    print_kv("VPP Pipeline Bubble Multiplier", f"{(1 / vpp):.2f}x", key_width=35)
+    print_kv("Pipeline Bubble Fraction", f"{pipeline_bubble_fraction:.2%}", key_width=35)
 
     print_h1_header("COMMUNICATION: DATA PARALLELISM")
     if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
