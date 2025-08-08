@@ -27,6 +27,7 @@ from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import product, safe_divide
 from dlcalc.utils.model_3d import MoeCfg, ParallelConfig, ThreeDParallelModel
 from dlcalc.utils.printing import (
+    _BOLD,
     _END,
     _GRAY,
     format_number,
@@ -124,7 +125,8 @@ def main() -> None:
     ###################################################################################
     # DATA
     ###################################################################################
-    print_h1_header("DATA CONFIGURATION")
+    print_section_separator()
+    print_info("Data Configuration")
     gbs = cfg["data"]["gbs"]
     mbs = cfg["data"]["microbatch_sz"]
 
@@ -140,7 +142,8 @@ def main() -> None:
     ###################################################################################
     # MODEL SUMMARY
     ###################################################################################
-    print_h1_header("MODEL ARCHITECTURE")
+    print_section_separator()
+    print_info("Model Architecture")
     total_params = model_repr.get_n_total_params(partitioned=False)
     active_params = model_repr.get_n_active_params(partitioned=False)
 
@@ -223,6 +226,10 @@ def main() -> None:
             bits_per_elt=model_repr.bits_per_parameter,
         )
 
+    # Collect all GEMM operations data first
+    gemm_operations = []
+    total_compute_time_ms = 0
+    
     for proj_name, weight_repr in projections.items():
         weight_repr: TensorRepr  # type: ignore[no-redef]
         flops = compute_gemm_flops(
@@ -230,13 +237,10 @@ def main() -> None:
             * model_repr.microbatch_sz,
             weight_shape=weight_repr.shape(partitioned=True),
         )
-        print(
-            f"{proj_name} {weight_repr.shape(partitioned=False)} --tp--> {weight_repr.shape(partitioned=True)}"
-        )
-        print(
-            f"\tCOMPUTE: {flops * 1e-12:.2f} TFLOPs -> "
-            f"{flops / machine_spec.device_spec.peak_flops * 1000:.3f} ms"
-        )
+        
+        compute_time_ms = flops / machine_spec.device_spec.peak_flops * 1000
+        total_compute_time_ms += compute_time_ms
+        
         bytes_per_element = model_repr.bits_per_parameter // 8
         gemm_input_dim, gemm_output_dim = weight_repr.shape(partitioned=True)
         weight_bytes = bytes_per_element * weight_repr.numel(partitioned=True)
@@ -250,18 +254,63 @@ def main() -> None:
             model_repr.microbatch_sz,
             gemm_output_dim,
         )
-        print(
-            f"\tLOAD INPUT: {input_bytes * 1e-9:.2f} GB -> "
-            f"{input_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms"
-        )
-        print(
-            f"\tLOAD_WEIGHT: {weight_bytes * 1e-9:.2f} GB -> "
-            f"{weight_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms"
-        )
-        print(
-            f"\tSTORE_OUTPUT: {output_bytes * 1e-9:.2f} GB -> "
-            f"{output_bytes / (machine_spec.device_spec.mem_bandwidth_bytes_per_sec) * 1000:.3f} ms"
-        )
+        
+        input_time_ms = input_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
+        weight_time_ms = weight_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
+        output_time_ms = output_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec * 1000
+        
+        gemm_operations.append({
+            "name": proj_name,
+            "weight_repr": weight_repr,
+            "flops": flops,
+            "compute_time_ms": compute_time_ms,
+            "input_bytes": input_bytes,
+            "input_time_ms": input_time_ms,
+            "weight_bytes": weight_bytes,
+            "weight_time_ms": weight_time_ms,
+            "output_bytes": output_bytes,
+            "output_time_ms": output_time_ms,
+        })
+    
+    # Display GEMM operations with better formatting
+    for op in gemm_operations:
+        percentage = (op["compute_time_ms"] / total_compute_time_ms) * 100 if total_compute_time_ms > 0 else 0
+        bar_length = int(percentage / 2)
+        bar = "█" * bar_length
+        
+        # Format operation name nicely
+        op_name_map = {
+            "QKV": "QKV Projection",
+            "ATTN_OUT": "Attention Output",
+            "MLP1": "MLP Up Projection",
+            "MLP2": "MLP Down Projection",
+            "MLP1_EXP": "MLP Up (Expert)",
+            "MLP2_EXP": "MLP Down (Expert)",
+        }
+        op_name_formatted = op_name_map.get(op["name"], op["name"])
+        
+        # Color based on compute intensity
+        if op["compute_time_ms"] > 0.5:
+            color = "\033[91m"  # Red for compute-heavy
+        elif op["compute_time_ms"] > 0.2:
+            color = "\033[93m"  # Yellow for medium
+        else:
+            color = "\033[92m"  # Green for light
+        
+        print(f"\n  {_BOLD}{op_name_formatted}{_END}")
+        print(f"    Shape: {op['weight_repr'].shape(partitioned=False)} → {op['weight_repr'].shape(partitioned=True)} (with TP={model_repr.parallelism_cfg.tp})")
+        
+        # Compute metrics with bar
+        print(f"    Compute: {color}{op['compute_time_ms']:.3f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}")
+        print(f"             {_GRAY}({format_number(op['flops'])} FLOPs){_END}")
+        
+        # Memory bandwidth metrics in a compact format
+        print(f"    Memory:  Input: {op['input_bytes'] / 1e9:.2f} GB ({op['input_time_ms']:.3f} ms)")
+        print(f"             Weight: {op['weight_bytes'] / 1e9:.2f} GB ({op['weight_time_ms']:.3f} ms)")
+        print(f"             Output: {op['output_bytes'] / 1e9:.2f} GB ({op['output_time_ms']:.3f} ms)")
+    
+    print()
+    print_metric("Total GEMM Compute", f"{total_compute_time_ms:.2f}", "ms", highlight=True)
 
     print_h1_header("COMMUNICATION: TENSOR PARALLELISM")
     # TODO. assumes SP, analysis pretty similar if not SP though
