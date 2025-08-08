@@ -1,16 +1,39 @@
-# dlcalc
+# 🚀 dlcalc
+
+<div align="center">
+
 [![PyPI version](https://badge.fury.io/py/dlcalc.svg)](https://badge.fury.io/py/dlcalc)
+[![Python](https://img.shields.io/pypi/pyversions/dlcalc.svg)](https://pypi.org/project/dlcalc/)
 ![checks](https://github.com/jfc4050/dlcalc/actions/workflows/python-app.yml/badge.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-random command line tools for deep learning
+**High-performance command-line tools for deep learning infrastructure optimization**
 
-## Installation
+[Installation](#-installation) • [Tools](#-tools) • [Contributing](#-contributing)
+
+</div>
+
+---
+
+## 📋 Overview
+
+`dlcalc` is a collection of tools for deep learning practitioners, providing calculators and tools for:
+
+- 🧮 **Performance Modeling** - Estimate training throughput, memory usage, and MFU
+- 🌐 **Topology Analysis** - Analyze and optimize network topology for distributed training
+- 📊 **Metrics Conversion** - Convert between different performance metrics
+- 🔍 **Checkpoint Analysis** - Inspect and summarize model checkpoints
+
+## 🔧 Installation
+
+### Via pip (recommended)
 ```bash
 pip install dlcalc
 ```
 
 or
 
+### From source
 ```bash
 git clone https://github.com/jfc4050/dlcalc
 cd dlcalc
@@ -21,97 +44,116 @@ After this you should have access to the command line tools described below. Som
 people may need to add `--user` to their pip install command for them to properly
 go under `$PATH`.
 
-# Tools
-## Performance Modeling
-### 3D Training Calculator
-Calculator for estimating various performance characteristics of 3D parallel
-transformer model training:
-* memory consumption
-* pipeline bubble
-* communication overhead
-* compute intensity
-* etc..
 
-This calculator is focused primarily on pretraining, so you won't find calculations
-for things like LoRA or RLHF/DPO/etc.
+## 🛠 Tools
 
-For more details run:
-```bash
-3dtrn -h
-```
+### 📐 Performance Modeling
 
-We've include a [sample config](examples/llama3_70b.yaml) you can use to see what the
-output looks like:
+#### **3D Training Calculator** (`3dtrn`)
+Calculator for estimating performance characteristics of ND parallel transformer training:
+
 ```bash
 3dtrn examples/llama3_70b.yaml
 ```
 
-We recommend pairing this with a profiler of your choice
-([NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and
-[PyTorch Profiler Traces](https://pytorch.org/docs/stable/profiler.html#torch.profiler._KinetoProfile.export_chrome_trace)
-are two good ones), and checking that what you see in the profiler is in the same
-ballpark as the theoretical values estimated by the calculator. If they are way
-off, you now know where to spend your investigation/debugging time.
+> We recommend to use this with profilers like [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) or [PyTorch Profiler](https://pytorch.org/docs/stable/profiler.html) to give theoretical grounding to your performance profiling.
 
-**NOTE:** If you look at the [sample config](examples/llama3_70b.yaml), you'll see that
-it takes an instance type which is used to derive various hardware
-specifications like intra/inter node bandwidth, theoretical FLOPS per device,
-number of accelerators per node, etc. You can check [hardware.py](dlcalc/utils/hardware.py)
-to see what instance types are supported, you'll have to add it there if the 
-instance type you're interested in isn't represented.
+### 🌐 Topology Optimization
 
-## Topology
-### Topology Visualizer
-Given a kubernetes pod name prefix for some compute cluster, retrieve AWS network
-topology info and plot. For more details run:
+| Tool | Command | Purpose |
+|------|---------|---------|
+| **Visualizer** | `topoviz` | Generate network topology graphs from Kubernetes clusters |
+| **Evaluator** | `topoeval` | Analyze topology optimality for DP rings |
+| **Scheduler** | `topoassign` | Compute topology-aware rank assignments |
+
 ```bash
+# Visualize cluster topology
 topoviz -h
-```
 
-### Topology Evaluator
-Evaluates how optimal a given training job's physical topology is (in terms of
-network hops in each DP ring). For more details run:
-```bash
+# Evaluate training job topology
 topoeval -h
-```
 
-### Topology-Aware Scheduler
-Topology-aware instance selection and rank assignment for maximally efficient DP
-communication. For more details run:
-```bash
+# Generate optimal rank assignments
 topoassign -h
 ```
 
-## KPIs
-### Samples/Sec -> Tokens/Day Converter
-Pretty self explanatory, for more details run:
+### 📊 Metrics & KPIs
+
+#### **Samples/Sec → MFU Converter** (`sps2mfu`)
+Convert training throughput to Model FLOPs Utilization (MFU):
+
 ```bash
-sps2tpd -h
+sps2mfu --samples-per-sec 100 --seqlen 2048 --model-size 70b \
+        --n-accelerators 512 --tflops-per-accelerator 312
 ```
 
-### Samples/Sec -> MFU Converter
-If you're not familiar with what Model Flops Utilization (MFU) means, refer to
-Google's [PaLM paper](https://arxiv.org/pdf/2204.02311). Otherwise pretty self
-explanatory, for more details run:
+#### **Samples/Sec → Tokens/Day Converter** (`sps2tpd`)
+Calculate daily token throughput:
+
 ```bash
-sps2mfu -h
+sps2tpd --samples-per-sec 100 --seqlen 2048
 ```
 
-## Misc.
-### Checkpoint Summarizer
-Gives a human-readable summarization of keys, values, and tensor shapes in
-a given (PyTorch) model checkpoint. For more details run:
+### 🔍 Utilities
+
+#### **Checkpoint Summarizer** (`ckpt-summarize`)
+Analyze PyTorch checkpoint contents:
+
 ```bash
-ckpt-summarize -h
+ckpt-summarize model.pt
 ```
 
-# Development
-install development dependencies
+## 🧑‍💻 Development
+
+### Setup Development Environment
+
 ```bash
+# Install with development dependencies
 pip install -e .[dev]
+
+# Install pre-commit hooks
+pre-commit install
 ```
 
-static checks can be run with
+### Run Quality Checks
+
 ```bash
+# Run all checks (formatting, linting, type checking, tests)
 bash checks
 ```
+
+### Testing
+
+```bash
+# Run full test suite
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=dlcalc --cov-report=term-missing
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 📮 Support
+
+- 🐛 [Report bugs](https://github.com/jfc4050/dlcalc/issues)
+- 💡 [Request features](https://github.com/jfc4050/dlcalc/issues)
+- 📖 [Read the docs](https://github.com/jfc4050/dlcalc/wiki)
+
+---
+
+<div align="center">
+Made with ❤️ for the deep learning community
+</div>
