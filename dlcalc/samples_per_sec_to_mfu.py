@@ -5,11 +5,8 @@ from argparse import ArgumentParser
 
 from dlcalc.utils.printing import (
     _GRAY,
-    _GREEN,
     _RED,
-    _YELLOW,
     format_number,
-    print_h1_header,
     print_info,
     print_kv,
     print_metric,
@@ -53,6 +50,8 @@ def parse_n_accelerators(n_accelerators_str: str) -> int:
     elif "x" in n_accelerators_str:
         # axb format
         match = re.match(n_accelerators_pattern, n_accelerators_str)
+        if not match:
+            raise ValueError(f"unable to parse n_accelerators format '{n_accelerators_str}'")
         multiplicand_1 = int(match.group(1))
         multiplicand_2 = int(match.group(2))
 

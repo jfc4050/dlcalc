@@ -13,12 +13,22 @@ repos:
     hooks:
       - id: mypy
         name: Type check with mypy
-        files: ^dlcalc/
-        args: [--config-file, pyproject.toml]
+        files: ^dlcalc/.*\.py$
+        args: [--config-file, pyproject.toml, --ignore-missing-imports]
         additional_dependencies:
           - types-PyYAML>=6.0.1
           - boto3-stubs[ec2]
           - kubernetes-stubs
+  
+  - repo: local
+    hooks:
+      - id: pytest
+        name: Run tests
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        args: [tests/, -q]
+        types: [python]
   
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0

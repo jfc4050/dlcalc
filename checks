@@ -2,6 +2,14 @@
 
 set -ex
 
+# Check code formatting (all files)
 ruff format --diff .
+
+# Lint code (all files)
 ruff check --output-format=github .
-mypy dlcalc/training_3d.py
+
+# Type check all dlcalc modules
+mypy dlcalc/
+
+# Run all tests with coverage
+pytest tests/ -v --cov=dlcalc --cov-report=term-missing
