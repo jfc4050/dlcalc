@@ -108,8 +108,8 @@ class TestMFUPredictions:
         assert actual_mfu is not None, f"Could not find MFU in output:\n{output[-1000:]}"
 
         # Expected MFU value with tolerance
-        # Updated for model_3d changes
-        expected_mfu = 13.60
+        # Updated for alltoall time calculation fixes
+        expected_mfu = 13.37
         tolerance = 0.5  # Allow 0.5% difference
 
         # Check if MFU within tolerance
@@ -146,7 +146,7 @@ class TestMFUPredictions:
         # Define test cases: (config_file, expected_mfu, tolerance)
         test_cases = [
             ("examples/llama3_70b.yaml", 30.22, 0.5),
-            ("examples/gpt_oss_120b.yaml", 13.60, 0.5),  # Updated for model_3d changes
+            ("examples/gpt_oss_120b.yaml", 13.37, 0.5),  # Updated for alltoall fixes
             # Add more test cases as needed
             # ("examples/llama3_8b.yaml", 45.0, 1.0),
         ]

@@ -199,9 +199,9 @@ def main() -> None:
             "ATTN_OUT": model_repr.attn_out_weight,
             "MLP1": model_repr.mlp_up_weight,
             "MLP2": model_repr.mlp_down_weight,
-            # TODO. need different section for MoE
         }
     )
+
     if model_repr.mlp_up_exp_weight is not None:
         expert_dim, *other_dims = model_repr.mlp_up_exp_weight.shape(partitioned=False)
         single_expert_shape = tuple(other_dims)
@@ -531,13 +531,9 @@ def main() -> None:
             )
             return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
-        # the alltoall will trade token partitioning along the capacity dimension
-        # for token partitioning along the experts dimension. i.e. we'll go from:
-        # (capacity / prod(token_partitioning_degrees_exp) / EP, n_experts) to
-        # (capacity / prod(token_partitioning_degrees_exp), n_experts / EP)
         a2a_time_s = get_all_to_all_comm_time_s(
             size=Size(
-                expert_capacity * hidden_sz,
+                n_local_experts * expert_capacity * hidden_sz,
                 bits_per_element=model_repr.bits_per_parameter,
             ),
             parallel_config=model_repr.parallelism_cfg,

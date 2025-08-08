@@ -22,8 +22,8 @@ model:
 
 parallelism:
   tp: 8
-  pp: 3
-  dp: 512
+  pp: 6
+  dp: 128
   ep: 8
   vpp: 6
   sp: true

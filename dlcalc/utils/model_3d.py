@@ -265,7 +265,7 @@ class ThreeDParallelModel:
                     ),
                     partition_spec={
                         0: self.parallelism_cfg.expert_mesh.ep,
-                        2: self.parallelism_cfg.tp,
+                        2: self.parallelism_cfg.expert_mesh.tp,
                     },  # col parallel
                     bits_per_elt=self.bits_per_parameter,
                 )
@@ -281,7 +281,7 @@ class ThreeDParallelModel:
                     ),
                     partition_spec={
                         0: self.parallelism_cfg.expert_mesh.ep,
-                        1: self.parallelism_cfg.tp,
+                        1: self.parallelism_cfg.expert_mesh.tp,
                     },  # row parallel
                     bits_per_elt=self.bits_per_parameter,
                 )
@@ -610,7 +610,7 @@ class ThreeDParallelModel:
 
         return safe_divide(
             int(
-                self.sequence_len
+                safe_divide(self.sequence_len, self.parallelism_cfg.tp * self.parallelism_cfg.cp)
                 * self.microbatch_sz
                 * self.moe_cfg.experts_per_token
                 * self.parallelism_cfg.expert_mesh.ep
