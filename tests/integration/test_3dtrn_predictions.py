@@ -29,10 +29,10 @@ def run_3dtrn(config_file: str, timeout: int = 30) -> Tuple[Optional[float], Opt
 
         output = result.stdout + result.stderr
 
-        # Find MFU in output - looking for "Predicted MFU: XX.XX%" (with potential ANSI codes)
+        # Find MFU in output - looking for "Theoretical MFU: XX.XX%" (with potential ANSI codes)
         # Remove ANSI escape codes first for easier matching
         clean_output = re.sub(r"\x1b\[[0-9;]*m", "", output)
-        mfu_match = re.search(r"Predicted MFU:\s*([0-9]+\.[0-9]+)%", clean_output)
+        mfu_match = re.search(r"Theoretical MFU:\s*([0-9]+\.[0-9]+)%", clean_output)
         mfu_value = float(mfu_match.group(1)) if mfu_match else None
 
         # Find total memory in output - looking for "Total Memory Required: XX.XXX GiB"
@@ -201,7 +201,7 @@ class TestMFUPredictions:
             "CONFIGURATION",
             "Model Architecture",
             "MEMORY",
-            "Predicted MFU:",
+            "Theoretical MFU:",
         ]
 
         missing_sections = []
