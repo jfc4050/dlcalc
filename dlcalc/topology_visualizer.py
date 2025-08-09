@@ -6,7 +6,7 @@ topology info and plot.
 import re
 from argparse import ArgumentParser
 
-import boto3  # type: ignore[import-untyped]
+import boto3  # type: ignore[import-untyped, import-not-found]
 from pyvis.network import Network
 
 import dlcalc.utils.cluster.ec2

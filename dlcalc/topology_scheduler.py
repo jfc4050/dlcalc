@@ -5,7 +5,7 @@ communication can occur with the fewest possible network hops.
 
 from argparse import ArgumentParser
 
-import boto3  # type: ignore[import-untyped]
+import boto3  # type: ignore[import-untyped, import-not-found]
 
 import dlcalc.utils.cluster.ec2
 import dlcalc.utils.cluster.kubernetes
