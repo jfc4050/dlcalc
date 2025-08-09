@@ -526,70 +526,74 @@ def main() -> None:
         )
 
         transformer_block_time_components: dict[str, float] = OrderedDict(
-            # Attention
-            pre_attn_norm=hbm_load_store_time_s,  # norm approximation
-            rope=hbm_load_store_time_s,  # RoPE approximation
-            pre_attn_ag=ag_time_s,
-            qkv_proj=compute_gemm_time_s(model_repr.qkv_weight),
-            sdpa=sdpa_time,
-            attn_out_proj=compute_gemm_time_s(model_repr.attn_out_weight),
-            post_attn_rs=rs_time_s,
-            post_attn_residual=hbm_load_store_time_s,
-            # MLP
-            pre_mlp_norm=hbm_load_store_time_s,  # norm approximation
-            router=compute_gemm_time_s(model_repr.router_weight),
-            # bunch of router operations that are hard to project and
-            # are highly implementation dependent.
-            pre_mlp_a2a=a2a_time_s,
-            pre_mlp_ag=get_expert_tp_all_gather_comm_time_s(
-                size=expert_activation_size,
-                parallel_config=model_repr.parallelism_cfg,
-                machine_spec=machine_spec,
-            ),
-            mlp_up_proj=compute_expert_gemm_time_s(
-                n_tokens_per_expert=expert_capacity,
-                weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
-            ),
-            glu_act=3  # read 2, write 1
-            * (
-                n_local_experts
-                * expert_capacity
-                * model_repr.moe_cfg.expert_inter_sz
-                * safe_divide(model_repr.bits_per_parameter, 8)
-            )
-            / machine_spec.device_spec.mem_bandwidth_bytes_per_sec,
-            mlp_down_proj=compute_expert_gemm_time_s(
-                n_tokens_per_expert=expert_capacity,
-                weight_repr=model_repr.mlp_down_exp_weight,  # type: ignore[arg-type]
-            ),
-            post_mlp_rs=get_expert_tp_reduce_scatter_comm_time_s(
-                size=expert_activation_size,
-                parallel_config=model_repr.parallelism_cfg,
-                machine_spec=machine_spec,
-            ),
-            post_mlp_a2a=a2a_time_s,
-            post_mlp_residual=hbm_load_store_time_s,
-            activation_send=activation_send_time_s,
+            {
+                # Attention
+                "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
+                "RoPE": hbm_load_store_time_s,  # RoPE approximation
+                "Pre Attn AG": ag_time_s,
+                "QKV Proj": compute_gemm_time_s(model_repr.qkv_weight),
+                "SDPA": sdpa_time,
+                "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight),
+                "Post Attn RS": rs_time_s,
+                "Post Attn Residual": hbm_load_store_time_s,
+                # MLP
+                "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
+                "Router": compute_gemm_time_s(model_repr.router_weight),
+                # bunch of router operations that are hard to project and
+                # are highly implementation dependent.
+                "Pre MLP A2A": a2a_time_s,
+                "Pre MLP AG": get_expert_tp_all_gather_comm_time_s(
+                    size=expert_activation_size,
+                    parallel_config=model_repr.parallelism_cfg,
+                    machine_spec=machine_spec,
+                ),
+                "MLP Up Proj": compute_expert_gemm_time_s(
+                    n_tokens_per_expert=expert_capacity,
+                    weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
+                ),
+                "Glu Act": 3  # read 2, write 1
+                * (
+                    n_local_experts
+                    * expert_capacity
+                    * model_repr.moe_cfg.expert_inter_sz
+                    * safe_divide(model_repr.bits_per_parameter, 8)
+                )
+                / machine_spec.device_spec.mem_bandwidth_bytes_per_sec,
+                "MLP Down Proj": compute_expert_gemm_time_s(
+                    n_tokens_per_expert=expert_capacity,
+                    weight_repr=model_repr.mlp_down_exp_weight,  # type: ignore[arg-type]
+                ),
+                "Post MLP RS": get_expert_tp_reduce_scatter_comm_time_s(
+                    size=expert_activation_size,
+                    parallel_config=model_repr.parallelism_cfg,
+                    machine_spec=machine_spec,
+                ),
+                "Post MLP A2A": a2a_time_s,
+                "Post MLP Residual": hbm_load_store_time_s,
+                "Activation Send": activation_send_time_s,
+            }
         )
     else:
         transformer_block_time_components: dict[str, float] = OrderedDict(  # type: ignore[no-redef]
-            # Attention
-            pre_attn_norm=hbm_load_store_time_s,  # norm approximation
-            rope=hbm_load_store_time_s,  # RoPE approximation
-            pre_attn_ag=ag_time_s,
-            qkv_proj=compute_gemm_time_s(model_repr.qkv_weight),
-            sdpa=sdpa_time,
-            attn_out_proj=compute_gemm_time_s(model_repr.attn_out_weight),
-            post_attn_rs=rs_time_s,
-            post_attn_residual=hbm_load_store_time_s,
-            # MLP
-            pre_mlp_norm=hbm_load_store_time_s,  # norm approximation
-            pre_mlp_ag=ag_time_s,
-            mlp_up_proj=compute_gemm_time_s(model_repr.mlp_up_weight),
-            mlp_down_proj=compute_gemm_time_s(model_repr.mlp_down_weight),
-            post_mlp_rs=rs_time_s,
-            post_mlp_residual=hbm_load_store_time_s,
-            activation_send=activation_send_time_s,
+            {
+                # Attention
+                "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
+                "RoPE": hbm_load_store_time_s,  # RoPE approximation
+                "Pre Attn AG": ag_time_s,
+                "QKV Proj": compute_gemm_time_s(model_repr.qkv_weight),
+                "SDPA": sdpa_time,
+                "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight),
+                "Post Attn RS": rs_time_s,
+                "Post Attn Residual": hbm_load_store_time_s,
+                # MLP
+                "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
+                "Pre MLP AG": ag_time_s,
+                "MLP Up Proj": compute_gemm_time_s(model_repr.mlp_up_weight),
+                "MLP Down Proj": compute_gemm_time_s(model_repr.mlp_down_weight),
+                "Post MLP RS": rs_time_s,
+                "Post MLP Residual": hbm_load_store_time_s,
+                "Activation Send": activation_send_time_s,
+            }
         )
 
     print()
@@ -601,9 +605,6 @@ def main() -> None:
         time_ms = component_time_s * 1000
         percentage = (component_time_s / total_transformer_block_time_s) * 100
 
-        # Format component name with proper spacing
-        formatted_name = component_name.replace("_", " ").title()
-
         # Use color coding based on percentage (custom thresholds for block components)
         color = get_color_for_component_percentage(percentage)
 
@@ -612,7 +613,7 @@ def main() -> None:
         bar = "█" * bar_length
 
         print(
-            f"  {formatted_name.ljust(25)} {color}{time_ms:7.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
+            f"  {component_name.ljust(25)} {color}{time_ms:7.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
         )
 
     print()
