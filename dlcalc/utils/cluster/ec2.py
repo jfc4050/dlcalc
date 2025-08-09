@@ -1,7 +1,7 @@
 import dataclasses
-from typing import List, Optional, Set
+from typing import Iterator, List, Optional, Set
 
-from botocore.client import BaseClient
+from botocore.client import BaseClient  # type: ignore[import-untyped]
 
 
 @dataclasses.dataclass
@@ -12,12 +12,12 @@ class InstanceInfo:
     network_nodes: List[str]  # order: farthest from instance -> closest to instance
 
 
-def iter_instance_info(
+def iter_instance_info(  # type: ignore[no-any-unimported]
     ec2_client: BaseClient,
     accepted_node_instance_types: Set[str],
     accepted_node_availability_zones: Set[str],
     accepted_instance_ids: Optional[Set[str]] = None,
-):
+) -> Iterator[InstanceInfo]:
     # ref: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-instance-topology.html
     paginator = ec2_client.get_paginator("describe_instance_topology")
 

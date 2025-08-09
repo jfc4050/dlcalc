@@ -5,11 +5,12 @@ network hops in each DP ring).
 
 from argparse import ArgumentParser
 
-import boto3
+import boto3  # type: ignore[import-untyped]
 
 import dlcalc.utils.cluster.ec2
 import dlcalc.utils.cluster.kubernetes
 import dlcalc.utils.cluster.topology
+from dlcalc.utils.cluster.topology import TreeNode
 from dlcalc.utils.math import safe_divide
 
 
@@ -113,11 +114,11 @@ def main() -> None:
 
     # find placement on physical topology
     for pp_rank in range(pp_degree):
-        dp_ring_for_pp_rank = [None] * nodes_per_dp_ring
+        dp_ring_for_pp_rank: list[TreeNode] = []
         for dp_rank in range(nodes_per_dp_ring):
             worker_id = pp_rank * nodes_per_dp_ring + dp_rank
             instance_id = worker_id_to_instance_id[worker_id]
-            dp_ring_for_pp_rank[dp_rank] = node_id_to_node[instance_id]
+            dp_ring_for_pp_rank.append(node_id_to_node[instance_id])
 
         traversal_dist = dlcalc.utils.cluster.topology.traversal_distance_of_ring(
             dp_ring_for_pp_rank

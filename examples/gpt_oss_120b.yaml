@@ -10,7 +10,7 @@ model:
   rotary_embeds: true
   dropout: false
   tie_embeddings: false
-  
+
   # MoE specific parameters
   moe:
     n_experts: 128
@@ -28,7 +28,7 @@ parallelism:
   vpp: 6
   sp: true
   zero_level: 1
-  
+
   bucket_size_mb: 2000
 
 performance:

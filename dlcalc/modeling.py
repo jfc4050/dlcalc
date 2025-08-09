@@ -8,7 +8,9 @@ from dlcalc.utils.math import safe_divide
 
 
 class Dtype(Enum):
-    pass
+    FP32 = "fp32"
+    FP16 = "fp16"
+    BF16 = "bf16"
 
 
 class Op(ABC):
@@ -54,20 +56,23 @@ class ExpertMLP(Op):
             m=n_tokens,
             k=hidden_dim,
             n=n_experts,
+            m_partition_degree=1,  # TODO: proper partitioning
+            k_partition_degree=1,
+            n_partition_degree=1,
+            dtype=Dtype.FP16,  # TODO: proper dtype from config
         )
 
         self.mlp_up = BatchedGEMM(
-            m=expert_capacity,
+            b=n_experts,  # batch size is number of experts
+            m=expert_capacity if expert_capacity else 1,  # TODO: proper expert capacity
             k=hidden_dim,
             # following common practice of merging up + gate matmuls in the event
             # we're using GLU.
             n=(mlp_hidden_dim * 2) if glu else mlp_hidden_dim,
-            m_partition_degree=None,  # TODO.
-            k_partition_degree=1,
-            n_partition_degree=tp,
         )
         self.mlp_down = BatchedGEMM(
-            m=expert_capacity,
+            b=n_experts,  # batch size is number of experts
+            m=expert_capacity if expert_capacity else 1,  # TODO: proper expert capacity
             k=(mlp_hidden_dim * 2) if glu else mlp_hidden_dim,
             n=hidden_dim,
         )
@@ -80,7 +85,12 @@ class Norm(Op):
         self.__n_tokens_partition_degree = n_tokens_partition_degree
 
     def compute_runtime_s(self, machine_spec: MachineSpec) -> timedelta:
-        pass
+        # TODO: implement proper normalization runtime calculation
+        return timedelta(seconds=0)
+
+    def get_n_params(self, partitioned: bool) -> int:
+        # TODO: implement proper parameter count for normalization
+        return 0
 
 
 class SDPA(Op):
@@ -114,7 +124,7 @@ class GEMM(Op):
 
         n_secs = n_flops_partitioned / machine_spec.device_spec.peak_flops
 
-        return timedelta.seconds(n_secs)
+        return timedelta(seconds=n_secs)
 
     def get_n_params(self, partitioned: bool) -> int:
         if partitioned:
@@ -131,3 +141,11 @@ class BatchedGEMM(Op):
         self.m = m
         self.k = k
         self.n = n
+
+    def compute_runtime_s(self, machine_spec: MachineSpec) -> timedelta:
+        # TODO: implement proper batched GEMM runtime calculation
+        return timedelta(seconds=0)
+
+    def get_n_params(self, partitioned: bool) -> int:
+        # TODO: implement proper parameter count
+        return 0

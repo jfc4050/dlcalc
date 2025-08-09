@@ -3,7 +3,7 @@ import functools
 import itertools
 from typing import Dict, List, Optional, Set
 
-from botocore.client import BaseClient
+from botocore.client import BaseClient  # type: ignore[import-untyped]
 
 import dlcalc.utils.cluster.ec2
 
@@ -11,14 +11,14 @@ import dlcalc.utils.cluster.ec2
 @dataclasses.dataclass
 class TreeNode:
     node_id: str
-    parent: "TreeNode"
+    parent: Optional["TreeNode"]
     children: Set["TreeNode"]
 
     def __hash__(self) -> int:
         return hash(self.node_id)
 
 
-def build_instance_tree(
+def build_instance_tree(  # type: ignore[no-any-unimported]
     ec2_client: BaseClient,
     accepted_node_instance_types: Set[str],
     accepted_node_availability_zones: Set[str],
@@ -64,9 +64,9 @@ def build_instance_tree(
             parent_node.children.add(child_node)
 
     # some sanity checks
-    root_nodes = set()
-    nonroot_nodes = set()
-    all_nodes = set()
+    root_nodes: Set[TreeNode] = set()
+    nonroot_nodes: Set[TreeNode] = set()
+    all_nodes: Set[TreeNode] = set()
     for node in node_id_to_node.values():
         if node.parent is None:
             root_nodes.add(node)

@@ -3,7 +3,7 @@ import json
 import re
 from typing import List, Set
 
-import kubernetes
+import kubernetes  # type: ignore[import-untyped]
 from kubernetes.client import CoreV1Api
 
 pod_id_pattern = re.compile(r"worker-(\d+)")
@@ -21,13 +21,13 @@ class KubernetesJobMember:
 
 
 def get_kubernetes_cluster_members(job_search_prefix: str) -> List[KubernetesJobMember]:
-    kubernetes.config.load_kube_config()
+    kubernetes.config.load_kube_config()  # type: ignore[attr-defined]
     client = CoreV1Api()
 
     node_name_to_pod_name = {}
     for pod_info in client.list_namespaced_pod(namespace="default", watch=False).items:
-        pod_name: str = pod_info.metadata.name
-        node_name: str = pod_info.spec.node_name
+        pod_name: str = pod_info.metadata.name if pod_info.metadata else ""  # type: ignore[union-attr,assignment]
+        node_name: str = pod_info.spec.node_name if pod_info.spec else ""  # type: ignore[union-attr,assignment]
 
         if not pod_name.startswith(job_search_prefix):
             continue
@@ -40,21 +40,40 @@ def get_kubernetes_cluster_members(job_search_prefix: str) -> List[KubernetesJob
 
     cluster_members = []
     for node_info in client.list_node().items:
-        node_name = node_info.metadata.name
+        if not node_info.metadata:
+            continue
+        node_name = node_info.metadata.name  # type: ignore[union-attr,assignment]
+        if not node_info.metadata.annotations:  # type: ignore[union-attr]
+            continue
         node_instance_id = json.loads(
-            node_info.metadata.annotations["csi.volume.kubernetes.io/nodeid"]
+            node_info.metadata.annotations["csi.volume.kubernetes.io/nodeid"]  # type: ignore[union-attr,index]
         )["fsx.csi.aws.com"]
         if node_name in node_name_to_pod_name:
             pod_name = node_name_to_pod_name[node_name]
-            worker_id = int(re.search(pod_id_pattern, pod_name).group(1))
+            match = re.search(pod_id_pattern, pod_name)
+            if match is None:
+                raise ValueError(f"Pod name {pod_name} doesn't match pattern {pod_id_pattern}")
+            worker_id = int(match.group(1))
 
-            node_region = node_info.metadata.labels["topology.kubernetes.io/region"]
+            node_region = (
+                node_info.metadata.labels["topology.kubernetes.io/region"]
+                if node_info.metadata.labels
+                else ""
+            )  # type: ignore[union-attr,index]
             cluster_regions.add(node_region)
 
-            node_az = node_info.metadata.labels["topology.kubernetes.io/zone"]
+            node_az = (
+                node_info.metadata.labels["topology.kubernetes.io/zone"]
+                if node_info.metadata.labels
+                else ""
+            )  # type: ignore[union-attr,index]
             cluster_azs.add(node_az)
 
-            node_instance_type = node_info.metadata.labels["node.kubernetes.io/instance-type"]
+            node_instance_type = (
+                node_info.metadata.labels["node.kubernetes.io/instance-type"]
+                if node_info.metadata.labels
+                else ""
+            )  # type: ignore[union-attr,index]
             cluster_instance_types.add(node_instance_type)
 
             member_def = KubernetesJobMember(
@@ -83,19 +102,24 @@ def get_kubernetes_cluster_members(job_search_prefix: str) -> List[KubernetesJob
 
 
 def get_free_instances() -> Set[str]:
-    kubernetes.config.load_kube_config()
+    kubernetes.config.load_kube_config()  # type: ignore[attr-defined]
     client = CoreV1Api()
 
     occupied_nodes = set()
     for pod_info in client.list_namespaced_pod(namespace="default", watch=False).items:
-        occupied_nodes.add(pod_info.spec.node_name)
+        if pod_info.spec:
+            occupied_nodes.add(pod_info.spec.node_name)  # type: ignore[union-attr]
 
     free_instance_ids = set()
     for node_info in client.list_node().items:
-        node_name = node_info.metadata.name
+        if not node_info.metadata:
+            continue
+        node_name = node_info.metadata.name  # type: ignore[union-attr,assignment]
         if node_name not in occupied_nodes:
+            if not node_info.metadata.annotations:  # type: ignore[union-attr]
+                continue
             node_instance_id = json.loads(
-                node_info.metadata.annotations["csi.volume.kubernetes.io/nodeid"]
+                node_info.metadata.annotations["csi.volume.kubernetes.io/nodeid"]  # type: ignore[union-attr,index]
             )["fsx.csi.aws.com"]
             free_instance_ids.add(node_instance_id)
 

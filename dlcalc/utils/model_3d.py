@@ -151,6 +151,10 @@ class ThreeDParallelModel:
 
     parallelism_cfg: ParallelConfig
 
+    # Instance variables set in __post_init__
+    mlp_up_exp_weight: Optional[TensorRepr] = dataclasses.field(init=False, default=None)
+    mlp_down_exp_weight: Optional[TensorRepr] = dataclasses.field(init=False, default=None)
+
     sequence_len: int
     microbatch_sz: int
 
@@ -487,7 +491,7 @@ class ThreeDParallelModel:
 
         n_local_mlps = (
             1
-            if self.moe_cfg is None
+            if self.moe_cfg is None or self.parallelism_cfg.expert_mesh is None
             else safe_divide(self.moe_cfg.n_experts, self.parallelism_cfg.expert_mesh.ep)
         )
         sbi = (

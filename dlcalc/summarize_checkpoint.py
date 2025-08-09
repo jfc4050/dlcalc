@@ -1,20 +1,21 @@
+# mypy: disable-error-code="no-any-unimported"
 import pprint
 from argparse import ArgumentParser
 from dataclasses import dataclass
 from typing import Tuple
 
-import torch
-from torch import Tensor
+import torch  # type: ignore[import-untyped]
+from torch import Tensor  # type: ignore[import-untyped]
 
 
-@dataclass
+@dataclass  # type: ignore[no-any-unimported]
 class TensorSummary:
-    shape: Tuple[int]
-    dtype: torch.dtype
+    shape: Tuple[int]  # type: ignore[no-any-unimported]
+    dtype: torch.dtype  # type: ignore[no-any-unimported]
 
     @staticmethod
-    def from_tensor(tensor: Tensor) -> "TensorSummary":
-        return TensorSummary(tuple(tensor.shape), dtype=tensor.dtype)
+    def from_tensor(tensor: Tensor) -> "TensorSummary":  # type: ignore[no-any-unimported]
+        return TensorSummary(tuple(tensor.shape), dtype=tensor.dtype)  # type: ignore[no-any-unimported]
 
 
 def summarize(obj: object) -> object:
@@ -30,7 +31,7 @@ def summarize(obj: object) -> object:
         return obj
 
 
-def main():
+def main() -> None:
     parser = ArgumentParser(__doc__)
     parser.add_argument("checkpoint_path")
     args = parser.parse_args()

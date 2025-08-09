@@ -6,7 +6,7 @@ topology info and plot.
 import re
 from argparse import ArgumentParser
 
-import boto3
+import boto3  # type: ignore[import-untyped]
 from pyvis.network import Network
 
 import dlcalc.utils.cluster.ec2
@@ -42,10 +42,10 @@ def main() -> None:
     ######################################################################################
     # STEP 2: Get topology of the instances acquired earlier.
     ######################################################################################
-    instance_ids = [m.node_instance_id for m in cluster_members]
+    instance_ids = {m.node_instance_id for m in cluster_members}
     (cluster_region,) = set(m.node_region for m in cluster_members)
-    cluster_instance_types = list(set(m.node_instance_type for m in cluster_members))
-    cluster_azs = list(set(m.node_az for m in cluster_members))
+    cluster_instance_types = {m.node_instance_type for m in cluster_members}
+    cluster_azs = {m.node_az for m in cluster_members}
     instance_id_to_job_member = {m.node_instance_id: m for m in cluster_members}
 
     print(f"getting topology info for instance IDs {instance_ids}")

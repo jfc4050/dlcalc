@@ -6,7 +6,7 @@ communication can occur with the fewest possible network hops.
 from argparse import ArgumentParser
 from typing import List
 
-import boto3
+import boto3  # type: ignore[import-untyped]
 
 import dlcalc.utils.cluster.ec2
 import dlcalc.utils.cluster.kubernetes
@@ -135,9 +135,9 @@ def main() -> None:
         #     f"but encountered {len(ordered_nodes)}"
         # )
 
-    ring_assignments: List[List[TreeNode]] = [None] * pp_degree
+    ring_assignments: List[List[TreeNode]] = []
     for pp_rank in range(pp_degree):
-        ring_assignments[pp_rank] = ordered_nodes[:nodes_per_dp_ring]
+        ring_assignments.append(ordered_nodes[:nodes_per_dp_ring])
         ordered_nodes = ordered_nodes[nodes_per_dp_ring:]
 
         print(f"ring for PP={pp_rank}")
