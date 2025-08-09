@@ -171,11 +171,13 @@ def main() -> None:
     ###################################################################################
     # MEMORY ANALYSIS
     ###################################################################################
-    print_h1_header("MEMORY: MODEL STATES")
+    print_h1_header("MEMORY")
+    print_section_separator()
+    print_info("Model States")
     print(model_repr.states)
 
-    # activations
-    print_h1_header("MEMORY: TRAINING ACTIVATIONS")
+    print_section_separator()
+    print_info("Activations")
     act_size_per_layer_per_inflight_microbatch = (
         model_repr.activation_size_per_microbatch_per_layer()
     )
@@ -196,7 +198,8 @@ def main() -> None:
     )
     print_kv("Total Activation Memory", f"{act_memory.bytes() / (1024**3):.3f} GiB", key_width=30)
 
-    print_h1_header("MEMORY: SUMMARY")
+    print_section_separator()
+    print_info("Summary")
     total_memory_gib = (model_repr.states.total_bytes(partitioned=True) + act_memory.bytes()) / (
         1024**3
     )
