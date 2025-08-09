@@ -32,7 +32,7 @@ Use the following tools:
 * `pre-commit`
 
 ## Development Philosophy
-* Test Driven Development: When you are asked to implement a feature, start by implementing unit tests and ensuring they fail.
+* Test Driven Development: When you are asked to implement a feature or fix a bug, start by implementing unit tests and ensuring they fail.
 * Simplicity: Write simple, straightforward code. Simplicity is valued over handling rare cases and backward compatibility. Avoid premature abstractions.
 * Bias for Failure: In situations where incorrect inputs are passed or a case can't be handled, it is preferred to simply throw an exception with a helpful error message rather than trying to fallback or recover.
 
