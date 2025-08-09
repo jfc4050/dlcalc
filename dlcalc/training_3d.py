@@ -9,6 +9,8 @@ import yaml
 
 from dlcalc.utils.comms import (
     get_all_to_all_comm_time_s,
+    get_cross_dc_dp_all_gather_comm_time_s,
+    get_cross_dc_dp_reduce_scatter_comm_time_s,
     get_dp_all_gather_bw_term_s,
     get_dp_all_gather_comm_time_s,
     get_dp_all_gather_latency_term_s,
@@ -21,7 +23,7 @@ from dlcalc.utils.comms import (
     get_tp_reduce_scatter_comm_time_s,
 )
 from dlcalc.utils.compute import compute_gemm_flops
-from dlcalc.utils.configurations import ActivationCheckpointingType
+from dlcalc.utils.configurations import ActivationCheckpointingType, CrossDCConfig
 from dlcalc.utils.data import Size, TensorRepr
 from dlcalc.utils.hardware import MachineSpec
 from dlcalc.utils.math import safe_divide
@@ -73,6 +75,15 @@ def main() -> None:
         expert_dp = safe_divide(dp * cp * tp, ep * expert_tp)
         expert_mesh = ParallelConfig.ExpertParallelCfg(ep=ep, tp=expert_tp, dp=expert_dp)
         print("expert mesh:", expert_mesh)
+
+    # Parse optional cross-DC configuration
+    cross_dc_config = None
+    if "cross_dc" in cfg and cfg["cross_dc"] is not None:
+        cross_dc_config = CrossDCConfig(
+            n_dcs=cfg["cross_dc"]["n_dcs"],
+            interconnect_bandwidth_gbps=cfg["cross_dc"]["interconnect_bandwidth_gbps"],
+            interconnect_latency_s=cfg["cross_dc"]["interconnect_latency_s"],
+        )
 
     model_repr = ThreeDParallelModel(
         parallelism_cfg=ParallelConfig(
@@ -132,6 +143,28 @@ def main() -> None:
         f"{machine_spec.device_spec.peak_flops / 1e12:.0f} TFLOPS",
         key_width=30,
     )
+
+    if cross_dc_config is not None:
+        print_section_separator()
+        print_info("Cross-DC Configuration")
+        print_kv("Number of DCs", str(cross_dc_config.n_dcs), key_width=30)
+        print_kv(
+            "Interconnect Bandwidth",
+            f"{cross_dc_config.interconnect_bandwidth_gbps:.0f} Gbps",
+            key_width=30,
+        )
+        print_kv(
+            "Interconnect Latency",
+            f"{cross_dc_config.interconnect_latency_s * 1000:.2f} ms",
+            key_width=30,
+        )
+        print_kv(
+            "Max Ring Latency",
+            f"{cross_dc_config.interconnect_latency_s * 1000:.2f} ms",
+            key_width=30,
+        )
+        nodes_per_dc = safe_divide(cluster_size, machine_spec.n_devices) // cross_dc_config.n_dcs
+        print_kv("Nodes per DC", str(nodes_per_dc), key_width=30)
 
     ###################################################################################
     # DATA
@@ -327,6 +360,11 @@ def main() -> None:
     print_kv("Pipeline Bubble Fraction", f"{pipeline_bubble_fraction:.2%}", key_width=30)
 
     print_h1_header("COMMUNICATION: DATA PARALLELISM")
+
+    # Initialize cross-DC communication times (will be updated if cross-DC is enabled)
+    cross_dc_grad_bucket_rs_time_s = None
+    cross_dc_param_bucket_ag_time_s = None
+
     if model_repr.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
         raise NotImplementedError
     else:
@@ -448,6 +486,67 @@ def main() -> None:
         print_metric(
             "Combined DP Comm", f"{total_rs_time + total_ag_time:.2f}", "ms", highlight=True
         )
+
+        # Cross-DC impact analysis
+        if cross_dc_config is not None:
+            print_section_separator()
+            print_info("Cross-DC Impact on DP Communication")
+
+            cross_dc_grad_bucket_rs_time_s = get_cross_dc_dp_reduce_scatter_comm_time_s(
+                size=grad_bucket_size,
+                parallel_config=model_repr.parallelism_cfg,
+                machine_spec=machine_spec,
+                cross_dc_config=cross_dc_config,
+            )
+
+            cross_dc_param_bucket_ag_time_s = get_cross_dc_dp_all_gather_comm_time_s(
+                size=param_bucket_size,
+                parallel_config=model_repr.parallelism_cfg,
+                machine_spec=machine_spec,
+                cross_dc_config=cross_dc_config,
+            )
+
+            rs_degradation_ms = (
+                cross_dc_grad_bucket_rs_time_s - grad_bucket_reduce_scatter_time_s
+            ) * 1000
+            ag_degradation_ms = (
+                cross_dc_param_bucket_ag_time_s - param_bucket_all_gather_time_s
+            ) * 1000
+
+            rs_degradation_pct = (
+                rs_degradation_ms / (grad_bucket_reduce_scatter_time_s * 1000)
+            ) * 100
+            ag_degradation_pct = (ag_degradation_ms / (param_bucket_all_gather_time_s * 1000)) * 100
+
+            print(f"\n  {_BOLD}Per-Bucket Cross-DC Degradation{_END}")
+            print_kv(
+                "  Reduce-Scatter Delta",
+                f"{rs_degradation_ms:.3f} ms ({rs_degradation_pct:.1f}% slower)",
+                key_width=30,
+            )
+            print_kv(
+                "  All-Gather Delta",
+                f"{ag_degradation_ms:.3f} ms ({ag_degradation_pct:.1f}% slower)",
+                key_width=30,
+            )
+
+            total_cross_dc_rs_time = cross_dc_grad_bucket_rs_time_s * n_buckets * 1000
+            total_cross_dc_ag_time = cross_dc_param_bucket_ag_time_s * n_buckets * 1000
+            total_cross_dc_dp_time = total_cross_dc_rs_time + total_cross_dc_ag_time
+
+            print(f"\n  {_BOLD}Total Cross-DC DP Communication{_END}")
+            print_kv("  Cross-DC RS Total", f"{total_cross_dc_rs_time:.2f} ms", key_width=30)
+            print_kv("  Cross-DC AG Total", f"{total_cross_dc_ag_time:.2f} ms", key_width=30)
+
+            total_degradation_ms = total_cross_dc_dp_time - (total_rs_time + total_ag_time)
+            total_degradation_pct = (total_degradation_ms / (total_rs_time + total_ag_time)) * 100
+
+            print_metric(
+                "  Total Cross-DC DP",
+                f"{total_cross_dc_dp_time:.2f}",
+                f"ms ({total_degradation_pct:.1f}% slower)",
+                highlight=True,
+            )
 
     ##################################################################################
     # Iteration Time
@@ -632,8 +731,14 @@ def main() -> None:
     )
     pipeline_bubble_time = transformer_block_time * pipeline_bubble_fraction
 
-    dp_ag_time = param_bucket_all_gather_time_s * n_buckets
-    dp_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets
+    if cross_dc_config is not None:
+        assert cross_dc_param_bucket_ag_time_s is not None
+        assert cross_dc_grad_bucket_rs_time_s is not None
+        dp_ag_time = cross_dc_param_bucket_ag_time_s * n_buckets
+        dp_rs_time = cross_dc_grad_bucket_rs_time_s * n_buckets
+    else:
+        dp_ag_time = param_bucket_all_gather_time_s * n_buckets
+        dp_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets
 
     # approximating optimizer step time as time to read/write states + optim states to/from HBM
     opt_step_time_s = (
