@@ -136,9 +136,9 @@ class TestMFUPredictions:
         )
 
         # Check that output mentions MoE since this is an MoE model
-        assert (
-            "MoE" in output or "expert" in output.lower()
-        ), "Output should mention MoE configuration"
+        assert "MoE" in output or "expert" in output.lower(), (
+            "Output should mention MoE configuration"
+        )
 
     def test_multiple_configs(self):
         """Test MFU predictions for multiple configurations if available."""
@@ -208,9 +208,9 @@ class TestMFUPredictions:
             if section not in clean_output:
                 missing_sections.append(section)
 
-        assert (
-            not missing_sections
-        ), f"Output missing expected sections: {missing_sections}\nOutput sample:\n{output[:500]}"
+        assert not missing_sections, (
+            f"Output missing expected sections: {missing_sections}\nOutput sample:\n{output[:500]}"
+        )
 
     @pytest.mark.parametrize(
         "batch_size,expected_range",
@@ -283,9 +283,9 @@ class TestErrorHandling:
         assert result.returncode != 0, "Should return non-zero exit code for invalid YAML"
 
         error_output = result.stdout + result.stderr
-        assert (
-            "yaml" in error_output.lower() or "parse" in error_output.lower()
-        ), f"Should report YAML parsing error, got: {error_output}"
+        assert "yaml" in error_output.lower() or "parse" in error_output.lower(), (
+            f"Should report YAML parsing error, got: {error_output}"
+        )
 
     def test_missing_required_fields(self, tmp_path):
         """Test that 3dtrn handles configs with missing required fields."""
