@@ -1,6 +1,5 @@
 import dataclasses
 from enum import Enum
-from typing import Optional
 
 from .configurations import ActivationCheckpointingType
 from .data import Size, TensorRepr
@@ -152,8 +151,8 @@ class ThreeDParallelModel:
     parallelism_cfg: ParallelConfig
 
     # Instance variables set in __post_init__
-    mlp_up_exp_weight: Optional[TensorRepr] = dataclasses.field(init=False, default=None)
-    mlp_down_exp_weight: Optional[TensorRepr] = dataclasses.field(init=False, default=None)
+    mlp_up_exp_weight: TensorRepr | None = dataclasses.field(init=False, default=None)
+    mlp_down_exp_weight: TensorRepr | None = dataclasses.field(init=False, default=None)
 
     sequence_len: int
     microbatch_sz: int
@@ -168,7 +167,7 @@ class ThreeDParallelModel:
 
     inter_sz: int
     glu: bool
-    moe_cfg: Optional[MoeCfg]
+    moe_cfg: MoeCfg | None
 
     rotary_embed: bool
 
@@ -431,7 +430,7 @@ class ThreeDParallelModel:
         moe: bool,
         # TODO. would rather not expose these.
         active: bool,
-        experts_per_token: Optional[int],
+        experts_per_token: int | None,
     ) -> int:
         assert active == (experts_per_token is not None)
 

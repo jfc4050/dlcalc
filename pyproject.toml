@@ -58,14 +58,26 @@ ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
     # pyflakes
     "F",
     # isort
-    "I"
+    "I",
+    # pyupgrade
+    "UP",
+    # flake8-future-annotations
+    "FA",
 ]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve types that are available in Python 3.10+
+keep-runtime-typing = true
+
+[tool.ruff.lint.isort]
+known-first-party = ["dlcalc"]
 
 [build-system]
 requires = ["hatchling"]

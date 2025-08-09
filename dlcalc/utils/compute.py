@@ -4,18 +4,16 @@ https://developer.nvidia.com/blog/cuda-refresher-cuda-programming-model/
 https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplication/index.html
 """
 
-from typing import Tuple
-
 from .math import ceil_divide, product
 
 
-def compute_gemm_flops(n_tokens: int, weight_shape: Tuple[int, ...]) -> float:
+def compute_gemm_flops(n_tokens: int, weight_shape: tuple[int, ...]) -> float:
     """compute the number of FLOPs in a linear layer. Given by 2MNK."""
     return 2 * n_tokens * product(*weight_shape)
 
 
 def compute_gemm_n_tiles(
-    n_tokens: int, weight_shape: Tuple[int, ...], tile_shape: Tuple[int, int, int]
+    n_tokens: int, weight_shape: tuple[int, ...], tile_shape: tuple[int, int, int]
 ) -> int:
     """get the total number of tiles for a GEMM. GEMMs can be tiled:
     * along output dimension M

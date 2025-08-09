@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import dataclasses
 import functools
 import itertools
-from typing import Dict, List, Optional, Set
 
 from botocore.client import BaseClient  # type: ignore[import-untyped]
 
@@ -11,8 +12,8 @@ import dlcalc.utils.cluster.ec2
 @dataclasses.dataclass
 class TreeNode:
     node_id: str
-    parent: Optional["TreeNode"]
-    children: Set["TreeNode"]
+    parent: TreeNode | None
+    children: set[TreeNode]
 
     def __hash__(self) -> int:
         return hash(self.node_id)
@@ -20,11 +21,11 @@ class TreeNode:
 
 def build_instance_tree(  # type: ignore[no-any-unimported]
     ec2_client: BaseClient,
-    accepted_node_instance_types: Set[str],
-    accepted_node_availability_zones: Set[str],
-    accepted_instance_ids: Optional[Set[str]] = None,
-) -> Dict[str, TreeNode]:
-    node_id_to_node: Dict[str, TreeNode] = {}
+    accepted_node_instance_types: set[str],
+    accepted_node_availability_zones: set[str],
+    accepted_instance_ids: set[str] | None = None,
+) -> dict[str, TreeNode]:
+    node_id_to_node: dict[str, TreeNode] = {}
 
     # construct tree of instance topology
     for instance_info in dlcalc.utils.cluster.ec2.iter_instance_info(
@@ -64,9 +65,9 @@ def build_instance_tree(  # type: ignore[no-any-unimported]
             parent_node.children.add(child_node)
 
     # some sanity checks
-    root_nodes: Set[TreeNode] = set()
-    nonroot_nodes: Set[TreeNode] = set()
-    all_nodes: Set[TreeNode] = set()
+    root_nodes: set[TreeNode] = set()
+    nonroot_nodes: set[TreeNode] = set()
+    all_nodes: set[TreeNode] = set()
     for node in node_id_to_node.values():
         if node.parent is None:
             root_nodes.add(node)
@@ -84,7 +85,7 @@ def build_instance_tree(  # type: ignore[no-any-unimported]
     return node_id_to_node
 
 
-def dfs_tree_leaves_only(root: TreeNode) -> List[TreeNode]:
+def dfs_tree_leaves_only(root: TreeNode) -> list[TreeNode]:
     if not root.children:
         return [root]
 
@@ -105,7 +106,7 @@ def dfs_tree_leaves_only(root: TreeNode) -> List[TreeNode]:
     return list_of_leaves
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def distance_between_nodes(node_a: TreeNode, node_b: TreeNode) -> int:
     if node_a == node_b:
         return 0
@@ -113,7 +114,7 @@ def distance_between_nodes(node_a: TreeNode, node_b: TreeNode) -> int:
     return 2 + distance_between_nodes(node_a.parent, node_b.parent)
 
 
-def traversal_distance_of_ring(ring_participants: List[TreeNode]) -> int:
+def traversal_distance_of_ring(ring_participants: list[TreeNode]) -> int:
     traversed_distance = 0
     for src_node_idx in range(len(ring_participants)):
         dst_node_idx = (src_node_idx + 1) % len(ring_participants)

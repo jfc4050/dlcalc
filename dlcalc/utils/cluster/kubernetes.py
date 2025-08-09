@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import dataclasses
 import json
 import re
-from typing import List, Set
 
 import kubernetes  # type: ignore[import-untyped]
 from kubernetes.client import CoreV1Api
@@ -20,7 +21,7 @@ class KubernetesJobMember:
     node_az: str
 
 
-def get_kubernetes_cluster_members(job_search_prefix: str) -> List[KubernetesJobMember]:
+def get_kubernetes_cluster_members(job_search_prefix: str) -> list[KubernetesJobMember]:
     kubernetes.config.load_kube_config()  # type: ignore[attr-defined]
     client = CoreV1Api()
 
@@ -101,7 +102,7 @@ def get_kubernetes_cluster_members(job_search_prefix: str) -> List[KubernetesJob
     return cluster_members
 
 
-def get_free_instances() -> Set[str]:
+def get_free_instances() -> set[str]:
     kubernetes.config.load_kube_config()  # type: ignore[attr-defined]
     client = CoreV1Api()
 

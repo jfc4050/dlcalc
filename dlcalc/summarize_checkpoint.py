@@ -2,7 +2,6 @@
 import pprint
 from argparse import ArgumentParser
 from dataclasses import dataclass
-from typing import Tuple
 
 import torch  # type: ignore[import-untyped]
 from torch import Tensor  # type: ignore[import-untyped]
@@ -10,7 +9,7 @@ from torch import Tensor  # type: ignore[import-untyped]
 
 @dataclass  # type: ignore[no-any-unimported]
 class TensorSummary:
-    shape: Tuple[int]  # type: ignore[no-any-unimported]
+    shape: tuple[int]  # type: ignore[no-any-unimported]
     dtype: torch.dtype  # type: ignore[no-any-unimported]
 
     @staticmethod

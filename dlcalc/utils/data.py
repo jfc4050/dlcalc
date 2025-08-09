@@ -1,5 +1,3 @@
-from typing import Dict, Tuple
-
 from .math import ceil_divide, product, safe_divide
 
 
@@ -53,8 +51,8 @@ class TensorRepr:
 
     def __init__(
         self,
-        unpartitioned_shape: Tuple[int, ...],
-        partition_spec: Dict[int, int],  # axis -> degree
+        unpartitioned_shape: tuple[int, ...],
+        partition_spec: dict[int, int],  # axis -> degree
         bits_per_elt: int,
         enforce_evenly_partitionable: bool = True,
     ) -> None:
@@ -69,7 +67,7 @@ class TensorRepr:
         self._partition_spec = partition_spec
         self._bits_per_elt = bits_per_elt
 
-    def shape(self, partitioned: bool) -> Tuple[int, ...]:
+    def shape(self, partitioned: bool) -> tuple[int, ...]:
         return self.__get_shape(partitioned=partitioned)
 
     def numel(self, partitioned: bool) -> int:
@@ -81,7 +79,7 @@ class TensorRepr:
             bits_per_element=self._bits_per_elt,
         )
 
-    def __get_shape(self, partitioned: bool) -> Tuple[int, ...]:
+    def __get_shape(self, partitioned: bool) -> tuple[int, ...]:
         if partitioned:
             shape = list(self._unpartitioned_shape)
             for partition_dim, partition_degree in self._partition_spec.items():

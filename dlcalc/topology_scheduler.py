@@ -4,7 +4,6 @@ communication can occur with the fewest possible network hops.
 """
 
 from argparse import ArgumentParser
-from typing import List
 
 import boto3  # type: ignore[import-untyped]
 
@@ -110,7 +109,7 @@ def main() -> None:
     print(f"discovered {len(node_id_to_node)} instances")
 
     # find root node
-    (root_node,) = [node for node in node_id_to_node.values() if node.parent is None]
+    (root_node,) = (node for node in node_id_to_node.values() if node.parent is None)
 
     # determine optimal topology
     # we want to select an ordered subset of nodes for optimal adjacency.
@@ -135,7 +134,7 @@ def main() -> None:
         #     f"but encountered {len(ordered_nodes)}"
         # )
 
-    ring_assignments: List[List[TreeNode]] = []
+    ring_assignments: list[list[TreeNode]] = []
     for pp_rank in range(pp_degree):
         ring_assignments.append(ordered_nodes[:nodes_per_dp_ring])
         ordered_nodes = ordered_nodes[nodes_per_dp_ring:]
