@@ -642,11 +642,13 @@ def main() -> None:
     )
 
     iteration_time_components: dict[str, float] = OrderedDict(
-        dp_ag=dp_ag_time,
-        transformer_block=transformer_block_time,
-        pipeline_bubble=pipeline_bubble_time,
-        dp_rs=dp_rs_time,
-        opt_step=opt_step_time_s,
+        {
+            "Transformer Block": transformer_block_time,
+            "DP All-Gather": dp_ag_time,
+            "DP Reduce-Scatter": dp_rs_time,
+            "Pipeline Bubble": pipeline_bubble_time,
+            "Optimizer Step": opt_step_time_s,
+        }
     )
 
     print_h2_header("ITERATION TIME COMPONENTS")
@@ -661,16 +663,6 @@ def main() -> None:
         time_ms = component_time_s * 1000
         percentage = (component_time_s / iteration_time_s) * 100
 
-        # Format component name
-        name_map = {
-            "dp_ag": "DP All-Gather",
-            "dp_rs": "DP Reduce-Scatter",
-            "transformer_block": "Transformer Blocks",
-            "pipeline_bubble": "Pipeline Bubble",
-            "opt_step": "Optimizer Step",
-        }
-        formatted_name = name_map.get(component_name, component_name.replace("_", " ").title())
-
         # Use color coding based on percentage
         color = get_color_by_percentage(percentage)
 
@@ -679,7 +671,7 @@ def main() -> None:
         bar = "█" * bar_length
 
         print(
-            f"  {formatted_name.ljust(20)} {color}{time_ms:8.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
+            f"  {component_name.ljust(20)} {color}{time_ms:8.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
         )
 
     print()
