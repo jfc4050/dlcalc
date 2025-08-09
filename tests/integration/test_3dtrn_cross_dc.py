@@ -73,7 +73,7 @@ class TestCrossDCIntegration:
                 "vpp": 1,
                 "sp": True,
                 "zero_level": 1,
-                "bucket_size_mb": 250,
+                "n_param_buckets": 5,
             },
             "performance": {
                 "activation_checkpointing_type": "selective",
@@ -138,7 +138,7 @@ class TestCrossDCIntegration:
                 "vpp": 1,
                 "sp": True,
                 "zero_level": 1,
-                "bucket_size_mb": 250,
+                "n_param_buckets": 5,
             },
             "performance": {
                 "activation_checkpointing_type": "selective",
@@ -201,7 +201,7 @@ class TestCrossDCIntegration:
                 "vpp": 1,
                 "sp": True,
                 "zero_level": 1,
-                "bucket_size_mb": 100,
+                "n_param_buckets": 5,
             },
             "performance": {
                 "activation_checkpointing_type": "selective",

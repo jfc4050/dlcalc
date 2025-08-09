@@ -122,7 +122,7 @@ def main() -> None:
         act_ckpting_type=ActivationCheckpointingType.from_str(
             cfg["performance"]["activation_checkpointing_type"]
         ),
-        bucket_size_bytes=int(cfg["parallelism"]["bucket_size_mb"] * 1e6),
+        n_param_buckets=cfg["parallelism"]["n_param_buckets"],
     )
 
     machine_spec = MachineSpec.from_str(cfg["hardware"]["node_type"])
@@ -395,22 +395,22 @@ def main() -> None:
 
         # grads are reduced in full-precision
         # params are all-gathered in half-precision
+        n_buckets = model_repr.n_param_buckets
         mp_params_size = model_repr.states.params_shard.size(partitioned=True)
+        param_bucket_numel = mp_params_size.numel() // model_repr.n_param_buckets
         # TODO. precisions here assume we are doing AMP
-        grad_bucket_numel = model_repr.grad_bucket_numel()
-        grad_bucket_size = Size(
-            numel=grad_bucket_numel,
-            bits_per_element=model_repr.bits_per_grad,
-        )
         param_bucket_size = Size(
-            numel=grad_bucket_numel,
+            numel=param_bucket_numel,
             bits_per_element=model_repr.bits_per_parameter,
         )
-        n_buckets = mp_params_size.numel() / grad_bucket_numel
+        grad_bucket_size = Size(
+            numel=param_bucket_numel,
+            bits_per_element=model_repr.bits_per_grad,
+        )
 
         print_kv("Params per MP rank", str(mp_params_size), key_width=30)
-        print_kv("Bucket Size", f"{format_number(grad_bucket_numel)} params", key_width=30)
-        print_kv("Number of Buckets", f"{math.ceil(n_buckets)}", key_width=30)
+        print_kv("Bucket Size", f"{format_number(param_bucket_numel)} params", key_width=30)
+        print_kv("Number of Buckets", str(n_buckets), key_width=30)
         grad_bucket_reduce_scatter_lat_term_s = get_dp_reduce_scatter_latency_term_s(
             parallel_config=model_repr.parallelism_cfg,
             machine_spec=machine_spec,

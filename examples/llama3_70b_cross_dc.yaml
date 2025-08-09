@@ -20,7 +20,7 @@ parallelism:
   sp: true
   zero_level: 1
 
-  bucket_size_mb: 250
+  n_param_buckets: 5
 
 performance:
   activation_checkpointing_type: selective

@@ -3,7 +3,7 @@ from enum import Enum
 
 from .configurations import ActivationCheckpointingType
 from .data import Size, TensorRepr
-from .math import ceil_divide, safe_divide
+from .math import safe_divide
 
 
 @dataclasses.dataclass
@@ -178,7 +178,7 @@ class ThreeDParallelModel:
 
     act_ckpting_type: ActivationCheckpointingType
 
-    bucket_size_bytes: int
+    n_param_buckets: int
 
     # TODO. assuming mixed precision here.
     bits_per_parameter: int = 16
@@ -371,9 +371,6 @@ class ThreeDParallelModel:
 
     def layers_per_pp_stage(self) -> int:
         return sum(self.__n_layers(mpmd_partitioned=True, moe=moe) for moe in [False, True])
-
-    def grad_bucket_numel(self) -> int:
-        return ceil_divide(self.bucket_size_bytes, safe_divide(self.bits_per_grad, 8))
 
     def __get_n_total_params(self, spmd_partitioned: bool, mpmd_partitioned: bool) -> int:
         return _sum(

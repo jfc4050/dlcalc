@@ -348,7 +348,7 @@ def sample_config(tmp_path):
             "vpp": 1,
             "sp": True,
             "zero_level": 1,
-            "bucket_size_mb": 250,
+            "n_param_buckets": 5,
         },
         "performance": {"activation_checkpointing_type": "selective"},
         "data": {"gbs": 512, "seqlen": 2048, "microbatch_sz": 1},
