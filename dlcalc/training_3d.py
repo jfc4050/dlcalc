@@ -731,6 +731,16 @@ def main() -> None:
     )
     pipeline_bubble_time = transformer_block_time * pipeline_bubble_fraction
 
+    # approximation: we'll assume all reductions are overlapped
+    # except for at the first pipeline stage, where they are completely exposed.
+    # Generally, for large training jobs where microbatch size is 1
+    # (i.e. not much computation to overlap with), the first pipeline stage's DP
+    # communication is almost completely exposed.
+    # VPP doesn't help much with this - even though in theory it allows some DP
+    # comms to be launched earlier, the DP costs are too expensive relative to final
+    # microbatch costs for this to make a significant difference.
+    # NOTE. this is an approximation when using EP, where there will be separate
+    # reduction groups for DP_exp and DP_nonexp.
     if cross_dc_config is not None:
         assert cross_dc_param_bucket_ag_time_s is not None
         assert cross_dc_grad_bucket_rs_time_s is not None
