@@ -608,13 +608,17 @@ class ThreeDParallelModel:
             raise RuntimeError
         assert self.parallelism_cfg.expert_mesh is not None
 
-        return safe_divide(
-            int(
-                safe_divide(self.sequence_len, self.parallelism_cfg.tp * self.parallelism_cfg.cp)
-                * self.microbatch_sz
-                * self.moe_cfg.experts_per_token
-                * self.parallelism_cfg.expert_mesh.ep
-                * self.moe_cfg.capacity_factor
-            ),
-            self.moe_cfg.n_experts,
+        # parallelisms (with token partitioning dimensions denoted by *)
+        # nonexpert: [DP*, CP*, TP]
+        # expert:    [EP, eDP*, eTP]
+
+        n_tokens_unpartitioned = self.sequence_len * self.microbatch_sz * self.parallelism_cfg.dp
+        n_expert_region_tokens_unpartitioned = int(
+            n_tokens_unpartitioned * self.moe_cfg.experts_per_token * self.moe_cfg.capacity_factor
         )
+        n_expert_region_tokens_partitioned = safe_divide(
+            n_expert_region_tokens_unpartitioned,
+            self.parallelism_cfg.expert_mesh.dp,
+        )
+
+        return safe_divide(n_expert_region_tokens_partitioned, self.moe_cfg.n_experts)

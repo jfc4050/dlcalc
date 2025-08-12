@@ -612,7 +612,9 @@ def main() -> None:
 
         a2a_time_s = get_all_to_all_comm_time_s(
             size=Size(
-                n_local_experts * expert_capacity * hidden_sz,
+                n_local_experts
+                * safe_divide(expert_capacity, model_repr.parallelism_cfg.expert_mesh.tp)
+                * hidden_sz,
                 bits_per_element=model_repr.bits_per_parameter,
             ),
             parallel_config=model_repr.parallelism_cfg,
