@@ -425,13 +425,12 @@ def _get_cross_dc_dp_all_gather_or_reduce_scatter_comm_time_s(
     machine_spec: MachineSpec,
     cross_dc_config: CrossDCConfig,
 ) -> float:
-    # we didn't forget about the MoE case.
-    # we typically want to avoid doing expert DP across the DCs, as usually:
-    # a) expert DP < non-expert DP, so doing it across DCs leads to more
-    #    rings sharing the same link.
-    # b) the majority of parameters are expert parameters, meaning more
-    #    data to move across a limited link
-    dp_degree = parallel_config.dp
+    if parallel_config.expert_mesh is None:
+        dp_degree = parallel_config.dp
+    else:
+        # we'll just use the expert DP case to approximate everything as
+        # it'll be the most taxing (most simultaneous rings)
+        dp_degree = parallel_config.expert_mesh.dp
     n_dp_rings = parallel_config.world_size() // dp_degree
     cross_dc_bw_per_ring = cross_dc_config.interconnect_bandwidth_bytes_per_sec() / n_dp_rings
 
