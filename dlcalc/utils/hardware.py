@@ -101,35 +101,22 @@ class MachineSpec:
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
-            "b300": MachineSpec(
+            "p6-b200.48xlarge": MachineSpec(
                 n_devices=8,
                 device_spec=DeviceSpec(
-                    peak_flops=int(2250e12),  # (ignore sparsity numbers)
-                    mem_bandwidth_bytes_per_sec=int(3350e9),  # TODO.
-                    mem_capacity_bytes=288 * (1024**3),
+                    peak_flops=int(2250e12),
+                    # 180GiB HBM3e
+                    mem_bandwidth_bytes_per_sec=int(4916e9),
+                    mem_capacity_bytes=180 * (1024**3),
                 ),
+                # NVLink 5
                 intra_node_connect=LinkSpec(
                     unidirectional_bw_bytes_per_sec=int(900e9),
-                    latency_sec=3e-6,
+                    latency_sec=3e-6,  # TODO.
                 ),
+                # https://aws.amazon.com/ec2/instance-types/p6/
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(800e9),
-                    latency_sec=EFA_LATENCY_S,
-                ),
-            ),
-            "gb300": MachineSpec(
-                n_devices=72,
-                device_spec=DeviceSpec(
-                    peak_flops=int(2500e12),  # (ignore sparsity numbers)
-                    mem_bandwidth_bytes_per_sec=int(3350e9),  # TODO.
-                    mem_capacity_bytes=288 * (1024**3),
-                ),
-                intra_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(900e9),
-                    latency_sec=3e-6,
-                ),
-                inter_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(800e9),
+                    unidirectional_bw_bytes_per_sec=int(400e9),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
