@@ -319,17 +319,15 @@ def get_all_to_all_comm_time_s(
 ) -> float:
     # For all-to-all in MoE context, participants are expert parallel ranks
     n_participants = parallel_config.expert_mesh.ep if parallel_config.expert_mesh else 1
-    mp_degree_in_node = parallel_config.tp
 
     lat_term_s = machine_spec.inter_node_connect.latency_sec
 
-    # we'll just model it as simultaneous sends of partition to all other participants.
-    bw = (
-        (machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / mp_degree_in_node)
-        if n_participants > 8
-        else machine_spec.intra_node_connect.unidirectional_bw_bytes_per_sec
+    bw = _get_effective_bw(
+        parallelism_type=ParallelismType.EP,
+        parallel_config=parallel_config,
+        machine_spec=machine_spec,
+        is_expert_comm=True,
     )
-
     bw_term_s = ((size.bytes() // n_participants) * (n_participants - 1)) / bw
 
     return lat_term_s + bw_term_s
