@@ -797,6 +797,8 @@ def main() -> None:
     print_h2_header("FINAL RESULTS")
     print()
     print_metric("Iteration Time", f"{iteration_time_s:.2f}", "seconds", highlight=True)
+    tokens_per_day = ((gbs * sequence_len) / iteration_time_s) * 60 * 60 * 24
+    print_metric("Tokens per Day (w/ 100% Goodput)", f"{tokens_per_day / 1e9:.2f}", unit="B")
 
     ideal_iteration_time = (
         gbs
