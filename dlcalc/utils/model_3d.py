@@ -354,10 +354,15 @@ class ThreeDParallelModel:
         return self.__get_n_active_params(partitioned=partitioned)
 
     def activation_size_per_microbatch_per_layer(self) -> Size:
+        activation_dict = self.__activation_numel_per_microbatch_per_layer()
         return Size(
-            numel=self.__activation_numel_per_microbatch_per_layer(),
+            numel=sum(activation_dict.values()),
             bits_per_element=self.bits_per_parameter,
         )
+
+    def activation_breakdown_per_microbatch_per_layer(self) -> dict[str, int]:
+        """Returns dictionary of activation name to numel for a single microbatch per layer."""
+        return self.__activation_numel_per_microbatch_per_layer()
 
     def vpp_penalty(self) -> float:
         """interleaved schedule requires storing activations for (1 + (p - 1)/pm)
@@ -474,7 +479,7 @@ class ThreeDParallelModel:
 
         return n_layers
 
-    def __activation_numel_per_microbatch_per_layer(self) -> int:
+    def __activation_numel_per_microbatch_per_layer(self) -> dict[str, int]:
         """
         See: Reducing Activation Recomputation in Large Transformer Models
         https://arxiv.org/pdf/2205.05198.pdf
@@ -496,57 +501,44 @@ class ThreeDParallelModel:
         )
 
         if self.act_ckpting_type == ActivationCheckpointingType.FULL:
-            return self.__sp_partition_if_on(sbh)  # just the block input
+            return {"Block Input": self.__sp_partition_if_on(sbh)}
         elif self.act_ckpting_type in (
             ActivationCheckpointingType.NONE,
             ActivationCheckpointingType.SELECTIVE,  # basically obsolete w/ flash attention
             ActivationCheckpointingType.SUPER_SELECTIVE,
         ):
-            return _sum(
+            return {
                 # LAYERNORM 1
-                self.__deallocate_for_ssc(self.__sp_partition_if_on(sbh)),  # output - QKV input
+                "Pre Attn Norm": self.__deallocate_for_ssc(self.__sp_partition_if_on(sbh)),
                 # QKV PROJ (col parallel linear)
-                self.__tp_partition(sbq),  # Q - attn input
-                self.__tp_partition(sbk),  # K - attn input
-                self.__tp_partition(sbv),  # V - attn input
+                "Query": self.__tp_partition(sbq),
+                "Key": self.__tp_partition(sbk),
+                "Value": self.__tp_partition(sbv),
                 # ROTARY EMBEDDINGS
-                self.__tp_partition(sbq) if self.rotary_embed else 0,  # Q rotary
-                self.__tp_partition(sbk) if self.rotary_embed else 0,  # K rotary
+                "Query Rotary": self.__tp_partition(sbq) if self.rotary_embed else 0,
+                "Key Rotary": self.__tp_partition(sbk) if self.rotary_embed else 0,
                 # SELF ATTENTION
-                # - skipping intermediates (checkpointed by FlashAttention)
-                self.__tp_partition(sbh),  # needed by down proj
-                # DOWN PROJ
-                # - output deallocated (dropout doesn't need to store)
+                "Attention Output": self.__tp_partition(sbh),
                 # DROPOUT
-                self.__deallocate_for_ssc(  # mask recomputed based on seed/offset
+                "Post Attention Dropout Mask": self.__deallocate_for_ssc(
                     self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0
-                ),  # dropout mask
-                # -  output deallocated: residual doesn't need to store
+                ),
                 # RESIDUAL
-                self.__sp_partition_if_on(sbh),  # needed by norm2, resid2
+                "Post Attention Residual": self.__sp_partition_if_on(sbh),
                 # LAYERNORM 2
-                self.__sp_partition_if_on(sbh),  # up/gate input
-                # MOE ROUTING
-                # TODO.
-                # MOE TOKEN PERMUTATION
-                # TODO.
+                "Pre MLP Norm": self.__sp_partition_if_on(sbh),
                 # MLP UP/GATE (col parallel linear)
-                n_local_mlps * self.__tp_partition(2 * sbi if self.glu else sbi),  # SwiGLU input
+                "Up/Gate": n_local_mlps * self.__tp_partition(2 * sbi if self.glu else sbi),
                 # SwiGLU
-                self.__deallocate_for_ssc(n_local_mlps * self.__tp_partition(sbi)),  # SiLU output
-                self.__deallocate_for_ssc(n_local_mlps * self.__tp_partition(sbi)),  # gate output
-                # MLP DOWN (row parallel linear)
-                # - output deallocated - dropout doesn't need to store
-                # MOE TOKEN UNPERMUTATION
-                # TODO.
+                "SiLU": self.__deallocate_for_ssc(n_local_mlps * self.__tp_partition(sbi)),
+                "Gate": self.__deallocate_for_ssc(n_local_mlps * self.__tp_partition(sbi)),
                 # DROPOUT
-                self.__deallocate_for_ssc(  # mask recomputed based on seed/offset
+                "Post MLP Dropout Mask": self.__deallocate_for_ssc(
                     self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0
-                ),  # dropout mask
-                # - output deallocated - residual doesn't need to store
+                ),
                 # RESIDUAL
-                self.__sp_partition_if_on(sbh),  # input to next norm1, resid1
-            )
+                "Post MLP Residual": self.__sp_partition_if_on(sbh),
+            }
         else:
             raise ValueError(f"unhandled checkpointing_type={self.act_ckpting_type}")
 

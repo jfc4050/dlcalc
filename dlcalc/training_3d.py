@@ -231,6 +231,29 @@ def main() -> None:
     )
     print_kv("Total Activation Memory", f"{act_memory.bytes() / (1024**3):.3f} GiB", key_width=30)
 
+    print()
+    print_info("Activation Breakdown per Layer/Microbatch")
+    activation_breakdown = model_repr.activation_breakdown_per_microbatch_per_layer()
+
+    # Calculate max sizes for better alignment
+    max_name_len = max(len(name) for name in activation_breakdown.keys())
+    total_numel = sum(activation_breakdown.values())
+    total_size_mib = (total_numel * model_repr.bits_per_parameter // 8) / (1024**2)
+
+    for name, numel in activation_breakdown.items():
+        size_mib = (numel * model_repr.bits_per_parameter // 8) / (1024**2)
+        percentage = (numel / total_numel) * 100
+        bar_width = int(percentage / 2)  # Scale to fit in terminal
+        bar = "█" * bar_width if bar_width > 0 else ""
+        color = get_color_for_component_percentage(percentage)
+        print(
+            f"    {name:<{max_name_len}} │ {numel:>12,} │ {size_mib:>8.1f} MiB │ {color} {percentage:>5.1f}% {bar}{_END}"
+        )
+    print(f"  {'─' * (max_name_len + 45)}")
+    print(
+        f"{_BOLD}    {'TOTAL':<{max_name_len}} │ {total_numel:>12,} │ {total_size_mib:>8.1f} MiB {_END}"
+    )
+
     print_section_separator()
     print_info("Summary")
     total_memory_gib = (model_repr.states.total_bytes(partitioned=True) + act_memory.bytes()) / (
