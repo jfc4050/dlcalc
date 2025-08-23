@@ -111,10 +111,8 @@ def _get_effective_bw(
 
     # otherwise, use inter-node link
     base_bw = machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
-    # TODO. what if we have something like TP2? there would be 4 TP groups per node.
-    n_groups_per_node = n_devices_per_node
 
-    return base_bw / n_groups_per_node
+    return base_bw / n_devices_per_node
 
 
 def get_tp_reduce_scatter_comm_time_s(
@@ -317,18 +315,36 @@ def get_all_to_all_comm_time_s(
     parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
 ) -> float:
-    # For all-to-all in MoE context, participants are expert parallel ranks
-    n_participants = parallel_config.expert_mesh.ep if parallel_config.expert_mesh else 1
+    assert parallel_config.expert_mesh is not None
 
-    lat_term_s = machine_spec.inter_node_connect.latency_sec
-
-    bw = _get_effective_bw(
-        parallelism_type=ParallelismType.EP,
-        parallel_config=parallel_config,
-        machine_spec=machine_spec,
-        is_expert_comm=True,
+    alltoall_n_nodes = parallel_config.expert_mesh.ep // (
+        machine_spec.n_devices // parallel_config.expert_mesh.tp
     )
-    bw_term_s = ((size.bytes() // n_participants) * (n_participants - 1)) / bw
+
+    lat_term_s = (
+        machine_spec.inter_node_connect.latency_sec
+        if alltoall_n_nodes > 1
+        else machine_spec.intra_node_connect.latency_sec
+    )
+
+    # we need to calculate the percentage of the comms that occur over the slowest link
+    # type, and only calculate the comm cost for the percentage of the message that
+    # travels over the slowest links.
+    #
+    # this is kind of a special situation for all-to-all. the other comm types predominantly
+    # use rings, where the slowest links act as a dam that rate limit the rest.
+    n_participants = parallel_config.expert_mesh.ep
+    if alltoall_n_nodes > 1:
+        alltoall_internode_fraction = (alltoall_n_nodes - 1) / alltoall_n_nodes
+        bw_term_s = (
+            (size.bytes() / n_participants) * alltoall_internode_fraction * (n_participants - 1)
+        ) / (
+            machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / machine_spec.n_devices
+        )
+    else:
+        bw_term_s = (
+            (size.bytes() / n_participants) * (n_participants - 1)
+        ) / machine_spec.intra_node_connect.unidirectional_bw_bytes_per_sec
 
     return lat_term_s + bw_term_s
 
