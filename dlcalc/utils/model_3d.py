@@ -488,16 +488,17 @@ class ThreeDParallelModel:
         sbq = self.sequence_len * self.microbatch_sz * self.n_q_heads * self.head_dim
         sbk = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
         sbv = self.sequence_len * self.microbatch_sz * self.n_kv_heads * self.head_dim
+        sbi = self.sequence_len * self.microbatch_sz * self.inter_sz
 
-        n_local_mlps = (
-            1
-            if self.moe_cfg is None or self.parallelism_cfg.expert_mesh is None
-            else safe_divide(self.moe_cfg.n_experts, self.parallelism_cfg.expert_mesh.ep)
+        is_moe = self.moe_cfg is not None
+        moe_n_local_experts = (
+            safe_divide(self.moe_cfg.n_experts, self.parallelism_cfg.expert_mesh.ep)
+            if self.moe_cfg is not None and self.parallelism_cfg.expert_mesh is not None
+            else 0
         )
-        sbi = (
-            self.sequence_len * self.microbatch_sz * self.inter_sz
-            if self.moe_cfg is None
-            else self.expert_capacity() * self.moe_cfg.expert_inter_sz
+        moe_nh = self.expert_capacity() * self.hidden_sz if self.moe_cfg is not None else 0
+        moe_ni = (
+            self.expert_capacity() * self.moe_cfg.expert_inter_sz if self.moe_cfg is not None else 0
         )
 
         if self.act_ckpting_type == ActivationCheckpointingType.FULL:
@@ -527,11 +528,32 @@ class ThreeDParallelModel:
                 "Post Attention Residual": self.__sp_partition_if_on(sbh),
                 # LAYERNORM 2
                 "Pre MLP Norm": self.__sp_partition_if_on(sbh),
+                # MLP Input (EP)
+                **(
+                    {}
+                    if not is_moe
+                    else {
+                        "MLP Input (EP)": moe_n_local_experts * self.__expert_tp_partition(moe_nh)
+                    }
+                ),
                 # MLP UP/GATE (col parallel linear)
-                "Up/Gate": n_local_mlps * self.__tp_partition(2 * sbi if self.glu else sbi),
+                "Up/Gate": (
+                    self.__tp_partition(2 * sbi if self.glu else sbi)
+                    if not is_moe
+                    else moe_n_local_experts
+                    * self.__expert_tp_partition(2 * moe_ni if self.glu else moe_ni)
+                ),
                 # SwiGLU
-                "SiLU": self.__deallocate_for_ssc(n_local_mlps * self.__tp_partition(sbi)),
-                "Gate": self.__deallocate_for_ssc(n_local_mlps * self.__tp_partition(sbi)),
+                "SiLU": self.__deallocate_for_ssc(
+                    self.__tp_partition(sbi)
+                    if not is_moe
+                    else moe_n_local_experts * self.__expert_tp_partition(moe_ni)
+                ),
+                "Gate": self.__deallocate_for_ssc(
+                    self.__tp_partition(sbi)
+                    if not is_moe
+                    else moe_n_local_experts * self.__expert_tp_partition(moe_ni)
+                ),
                 # DROPOUT
                 "Post MLP Dropout Mask": self.__deallocate_for_ssc(
                     self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0
@@ -548,6 +570,10 @@ class ThreeDParallelModel:
             x = safe_divide(x, parallelism_degree)
 
         return x
+
+    def __expert_tp_partition(self, unpartitioned_numel: int) -> int:
+        assert self.parallelism_cfg.expert_mesh is not None
+        return safe_divide(unpartitioned_numel, self.parallelism_cfg.expert_mesh.tp)
 
     def __deallocate_for_ssc(self, numel: int) -> int:
         if self.act_ckpting_type == ActivationCheckpointingType.SUPER_SELECTIVE:
