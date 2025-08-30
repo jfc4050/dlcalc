@@ -528,6 +528,14 @@ class ThreeDParallelModel:
                 "Post Attention Residual": self.__sp_partition_if_on(sbh),
                 # LAYERNORM 2
                 "Pre MLP Norm": self.__sp_partition_if_on(sbh),
+                # Permuted Input
+                **(
+                    {}
+                    if not is_moe
+                    else {
+                        "Permuted Input": moe_n_local_experts * self.__expert_tp_partition(moe_nh)
+                    }
+                ),
                 # MLP Input (EP)
                 **(
                     {}
@@ -553,6 +561,15 @@ class ThreeDParallelModel:
                     self.__tp_partition(sbi)
                     if not is_moe
                     else moe_n_local_experts * self.__expert_tp_partition(moe_ni)
+                ),
+                # Unpermuted Input
+                **(
+                    {}
+                    if not is_moe
+                    else {
+                        "Unpermuted Output": moe_n_local_experts
+                        * self.__expert_tp_partition(moe_nh)
+                    }
                 ),
                 # DROPOUT
                 "Post MLP Dropout Mask": self.__deallocate_for_ssc(

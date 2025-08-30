@@ -124,7 +124,7 @@ class TestMFUPredictions:
 
         # Expected memory value with tolerance
         # Updated for model_3d changes
-        expected_mem = 17.304  # GiB
+        expected_mem = 18.226  # GiB
         mem_tolerance = 0.5  # Allow 0.5 GiB difference
 
         # Check if memory within tolerance
