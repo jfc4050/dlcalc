@@ -747,7 +747,12 @@ def main() -> None:
     print()
 
     transformer_block_fwd_time = sum(transformer_block_time_components.values())
-    transformer_block_bwd_time = 2 * transformer_block_fwd_time
+    transformer_block_bwd_time = {
+        ActivationCheckpointingType.NONE: 2 * transformer_block_fwd_time,
+        ActivationCheckpointingType.SELECTIVE: 2 * transformer_block_fwd_time,
+        ActivationCheckpointingType.SUPER_SELECTIVE: 2 * transformer_block_fwd_time,
+        ActivationCheckpointingType.FULL: 3 * transformer_block_fwd_time,  # extra fwd
+    }[model_repr.act_ckpting_type]
     n_fwds = n_microbatches_per_mp_rank * layers_per_pp_stage
     n_bwds = n_fwds
 
