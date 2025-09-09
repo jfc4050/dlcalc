@@ -21,7 +21,8 @@ model:
     expert_tp_degree: 1
 
 parallelism:
-  tp: 8
+  tp: 1
+  cp: 1
   pp: 6
   dp: 128
   ep: 8

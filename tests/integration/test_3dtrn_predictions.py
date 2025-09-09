@@ -108,7 +108,7 @@ class TestMFUPredictions:
 
         # Expected MFU value with tolerance
         # Updated for alltoall time calculation fixes
-        expected_mfu = 13.37
+        expected_mfu = 41.55
         tolerance = 0.5  # Allow 0.5% difference
 
         # Check if MFU within tolerance
@@ -124,7 +124,7 @@ class TestMFUPredictions:
 
         # Expected memory value with tolerance
         # Updated for model_3d changes
-        expected_mem = 18.226  # GiB
+        expected_mem = 51.155  # GiB
         mem_tolerance = 0.5  # Allow 0.5 GiB difference
 
         # Check if memory within tolerance
@@ -145,7 +145,7 @@ class TestMFUPredictions:
         # Define test cases: (config_file, expected_mfu, tolerance)
         test_cases = [
             ("examples/llama3_70b.yaml", 30.22, 0.5),
-            ("examples/gpt_oss_120b.yaml", 13.37, 0.5),  # Updated for alltoall fixes
+            ("examples/gpt_oss_120b.yaml", 41.55, 0.5),  # Updated for alltoall fixes
             # Add more test cases as needed
             # ("examples/llama3_8b.yaml", 45.0, 1.0),
         ]
