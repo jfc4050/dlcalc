@@ -575,6 +575,15 @@ def main() -> None:
     # Iteration Time
     ##################################################################################
     print_h1_header("PERFORMANCE: ITERATION TIME ANALYSIS")
+    print_info(
+        "NOTE: This is intended to give theoretical time estimates. \n  "
+        "Any gaps between this and observations will be a combination of: \n  "
+        "\n  "
+        "a) errors in the modeling. please cut an issue if you find one. \n  "
+        "b) implementation issues that you should consider fixing. \n  "
+        "   common issues include CPU boundedness, jitter, stragglers, \n  "
+        "   dataloading, etc. \n  "
+    )
     n_tokens = model_repr.microbatch_sz * model_repr.sequence_len
 
     def compute_gemm_time_s(weight_repr: TensorRepr) -> float:
