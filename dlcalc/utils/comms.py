@@ -26,10 +26,11 @@ class ParallelismType(Enum):
     DP = 1  # Data Parallel
     CP = 2  # Context Parallel
     TP = 3  # Tensor Parallel
+
     # Expert parallelism types
-    EDP = 1  # Expert Data Parallel (same level as DP)
-    EP = 2  # Expert Parallel (same level as CP)
-    ETP = 3  # Expert Tensor Parallel (same level as TP)
+    EDP = 4  # Expert Data Parallel
+    EP = 5  # Expert Parallel
+    ETP = 6  # Expert Tensor Parallel
 
 
 def _get_effective_bw(
@@ -176,7 +177,7 @@ def get_dp_reduce_scatter_bw_term_s(
                 else ParallelismType.EDP,
                 parallel_config=parallel_config,
                 machine_spec=machine_spec,
-                is_expert_comm=False,
+                is_expert_comm=parallel_config.expert_mesh is not None,
             )
         ),
     )
@@ -237,7 +238,7 @@ def get_dp_all_gather_bw_term_s(
                 else ParallelismType.EDP,
                 parallel_config=parallel_config,
                 machine_spec=machine_spec,
-                is_expert_comm=False,
+                is_expert_comm=parallel_config.expert_mesh is not None,
             )
         ),
     )
