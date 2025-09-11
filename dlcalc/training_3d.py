@@ -658,6 +658,7 @@ def main() -> None:
             bits_per_element=model_repr.bits_per_parameter,
         )
 
+        assert model_repr.router_weight is not None
         transformer_block_time_components: dict[str, float] = OrderedDict(
             {
                 # Attention

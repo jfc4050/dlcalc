@@ -151,6 +151,7 @@ class ThreeDParallelModel:
     parallelism_cfg: ParallelConfig
 
     # Instance variables set in __post_init__
+    router_weight: TensorRepr | None = dataclasses.field(init=False, default=None)
     mlp_up_exp_weight: TensorRepr | None = dataclasses.field(init=False, default=None)
     mlp_down_exp_weight: TensorRepr | None = dataclasses.field(init=False, default=None)
 
@@ -210,6 +211,7 @@ class ThreeDParallelModel:
             partition_spec={1: self.parallelism_cfg.tp},  # vocab-parallel
             bits_per_elt=self.bits_per_parameter,
         )
+
         self.pre_attn_norm_weight = TensorRepr(
             unpartitioned_shape=(self.hidden_sz,),
             partition_spec={},  # replicated
@@ -229,11 +231,9 @@ class ThreeDParallelModel:
             partition_spec={0: self.parallelism_cfg.tp},  # row parallel
             bits_per_elt=self.bits_per_parameter,
         )
-        self.router_weight = TensorRepr(
-            unpartitioned_shape=(
-                self.hidden_sz,
-                self.moe_cfg.n_experts if self.moe_cfg else 0,
-            ),
+
+        self.pre_mlp_norm_weight = TensorRepr(
+            unpartitioned_shape=(self.hidden_sz,),
             partition_spec={},
             bits_per_elt=self.bits_per_parameter,
         )
@@ -255,6 +255,13 @@ class ThreeDParallelModel:
 
         if self.moe_cfg is not None:
             assert self.parallelism_cfg.expert_mesh is not None
+            assert self.moe_cfg is not None
+
+            self.router_weight = TensorRepr(
+                unpartitioned_shape=(self.hidden_sz, self.moe_cfg.n_experts),
+                partition_spec={},
+                bits_per_elt=self.bits_per_parameter,
+            )
             self.mlp_up_exp_weight = (
                 TensorRepr(
                     # following common practice of merging up + gate matmuls in the event
@@ -292,14 +299,9 @@ class ThreeDParallelModel:
                 else None
             )
         else:
+            self.router_weight = None
             self.mlp_up_exp_weight = None
             self.mlp_down_exp_weight = None
-
-        self.pre_mlp_norm_weight = TensorRepr(
-            unpartitioned_shape=(self.hidden_sz,),
-            partition_spec={},  # replicated
-            bits_per_elt=self.bits_per_parameter,
-        )
 
         if self.parallelism_cfg.zero_level != ParallelConfig.ZeroLevel.PARTITION_OPTIMIZER:
             raise NotImplementedError
