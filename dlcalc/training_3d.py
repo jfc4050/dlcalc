@@ -738,12 +738,12 @@ def main() -> None:
     transformer_block_time_summaries: dict[str, tuple[float, dict[str, float]]] = {}
     moe_layer_ratio = model_repr.moe_cfg.moe_frequency if model_repr.moe_cfg else 0
     if moe_layer_ratio < 1:
-        transformer_block_time_summaries["DENSE"] = (
+        transformer_block_time_summaries["Dense"] = (
             1 - moe_layer_ratio,
             transformer_block_time_components_dense,
         )
     if moe_layer_ratio > 0:
-        transformer_block_time_summaries["MOE"] = (
+        transformer_block_time_summaries["MoE"] = (
             moe_layer_ratio,
             transformer_block_time_components_moe,
         )
