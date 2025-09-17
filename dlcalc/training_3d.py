@@ -749,10 +749,10 @@ def main() -> None:
         )
 
     for block_type, (
-        _,
+        weight,
         transformer_block_time_components,
     ) in transformer_block_time_summaries.items():
-        print_h2_header(f"TRANSFORMER BLOCK COMPONENTS ({block_type})")
+        print_h2_header(f"TRANSFORMER BLOCK COMPONENTS ({block_type}, weight={weight})")
         total_transformer_block_time_s = sum(transformer_block_time_components.values())
 
         # Keep original ordering to preserve logical flow of operations
