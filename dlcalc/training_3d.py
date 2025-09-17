@@ -622,6 +622,29 @@ def main() -> None:
     )
     sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
+    transformer_block_time_components_dense: dict[str, float] = OrderedDict(
+        {
+            # Attention
+            "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
+            "RoPE": hbm_load_store_time_s,  # RoPE approximation
+            "Pre Attn AG": ag_time_s,
+            "QKV Proj": compute_gemm_time_s(model_repr.qkv_weight),
+            "SDPA": sdpa_time,
+            "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight),
+            "Post Attn RS": rs_time_s,
+            "Post Attn Residual": hbm_load_store_time_s,
+            # MLP
+            "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
+            "Pre MLP AG": ag_time_s,
+            "MLP Up Proj": compute_gemm_time_s(model_repr.mlp_up_weight),
+            "MLP Down Proj": compute_gemm_time_s(model_repr.mlp_down_weight),
+            "Post MLP RS": rs_time_s,
+            "Post MLP Residual": hbm_load_store_time_s,
+            "Activation Send": activation_send_time_s,
+        }
+    )
+
+    transformer_block_time_components_moe: dict[str, float] = {}
     if model_repr.moe_cfg is not None:
         assert model_repr.parallelism_cfg.expert_mesh is not None
 
@@ -659,7 +682,7 @@ def main() -> None:
         )
 
         assert model_repr.router_weight is not None
-        transformer_block_time_components: dict[str, float] = OrderedDict(
+        transformer_block_time_components_moe: dict[str, float] = OrderedDict(  # type: ignore[no-redef]
             {
                 # Attention
                 "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
@@ -707,56 +730,58 @@ def main() -> None:
                 "Activation Send": activation_send_time_s,
             }
         )
-    else:
-        transformer_block_time_components: dict[str, float] = OrderedDict(  # type: ignore[no-redef]
-            {
-                # Attention
-                "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
-                "RoPE": hbm_load_store_time_s,  # RoPE approximation
-                "Pre Attn AG": ag_time_s,
-                "QKV Proj": compute_gemm_time_s(model_repr.qkv_weight),
-                "SDPA": sdpa_time,
-                "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight),
-                "Post Attn RS": rs_time_s,
-                "Post Attn Residual": hbm_load_store_time_s,
-                # MLP
-                "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
-                "Pre MLP AG": ag_time_s,
-                "MLP Up Proj": compute_gemm_time_s(model_repr.mlp_up_weight),
-                "MLP Down Proj": compute_gemm_time_s(model_repr.mlp_down_weight),
-                "Post MLP RS": rs_time_s,
-                "Post MLP Residual": hbm_load_store_time_s,
-                "Activation Send": activation_send_time_s,
-            }
-        )
 
     print()
-    print_h2_header("TRANSFORMER BLOCK COMPONENTS")
-    total_transformer_block_time_s = sum(transformer_block_time_components.values())
 
-    # Keep original ordering to preserve logical flow of operations
-    for component_name, component_time_s in transformer_block_time_components.items():
-        time_ms = component_time_s * 1000
-        percentage = (component_time_s / total_transformer_block_time_s) * 100
-
-        # Use color coding based on percentage (custom thresholds for block components)
-        color = get_color_for_component_percentage(percentage)
-
-        # Create a simple bar chart
-        bar_length = int(percentage / 2)  # Scale to max 50 chars
-        bar = "█" * bar_length
-
-        print(
-            f"  {component_name.ljust(25)} {color}{time_ms:7.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
+    transformer_block_time_summaries: dict[str, tuple[float, dict[str, float]]] = {}
+    moe_layer_ratio = model_repr.moe_cfg.moe_frequency if model_repr.moe_cfg else 0
+    if moe_layer_ratio < 1:
+        transformer_block_time_summaries["DENSE"] = (
+            1 - moe_layer_ratio,
+            transformer_block_time_components_dense,
+        )
+    if moe_layer_ratio > 0:
+        transformer_block_time_summaries["MOE"] = (
+            moe_layer_ratio,
+            transformer_block_time_components_moe,
         )
 
-    print()
-    print_metric(
-        "Total Block Time", f"{total_transformer_block_time_s * 1000:.2f}", "ms", highlight=True
+    for block_type, (
+        _,
+        transformer_block_time_components,
+    ) in transformer_block_time_summaries.items():
+        print_h2_header(f"TRANSFORMER BLOCK COMPONENTS ({block_type})")
+        total_transformer_block_time_s = sum(transformer_block_time_components.values())
+
+        # Keep original ordering to preserve logical flow of operations
+        for component_name, component_time_s in transformer_block_time_components.items():
+            time_ms = component_time_s * 1000
+            percentage = (component_time_s / total_transformer_block_time_s) * 100
+
+            # Use color coding based on percentage (custom thresholds for block components)
+            color = get_color_for_component_percentage(percentage)
+
+            # Create a simple bar chart
+            bar_length = int(percentage / 2)  # Scale to max 50 chars
+            bar = "█" * bar_length
+
+            print(
+                f"  {component_name.ljust(25)} {color}{time_ms:7.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
+            )
+
+        print()
+        print_metric(
+            "Total Block Time",
+            f"{total_transformer_block_time_s * 1000:.2f}",
+            "ms",
+            highlight=True,
+        )
+        print()
+
+    transformer_block_fwd_time = sum(
+        weight * sum(components.values())
+        for weight, components in transformer_block_time_summaries.values()
     )
-    print()
-
-    transformer_block_fwd_time = sum(transformer_block_time_components.values())
     transformer_block_bwd_time = {
         ActivationCheckpointingType.NONE: 2 * transformer_block_fwd_time,
         ActivationCheckpointingType.SELECTIVE: 2 * transformer_block_fwd_time,
