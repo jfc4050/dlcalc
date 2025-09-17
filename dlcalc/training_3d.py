@@ -640,9 +640,10 @@ def main() -> None:
             "MLP Down Proj": compute_gemm_time_s(model_repr.mlp_down_weight),
             "Post MLP RS": rs_time_s,
             "Post MLP Residual": hbm_load_store_time_s,
-            "Activation Send": activation_send_time_s,
         }
     )
+    if model_repr.parallelism_cfg.pp > 1:
+        transformer_block_time_components_dense["Activation Send"] = activation_send_time_s
 
     transformer_block_time_components_moe: dict[str, float] = {}
     if model_repr.moe_cfg is not None:
@@ -727,9 +728,10 @@ def main() -> None:
                 ),
                 "Post MLP A2A": a2a_time_s,
                 "Post MLP Residual": hbm_load_store_time_s,
-                "Activation Send": activation_send_time_s,
             }
         )
+        if model_repr.parallelism_cfg.pp > 1:
+            transformer_block_time_components_moe["Activation Send"] = activation_send_time_s
 
     print()
 
