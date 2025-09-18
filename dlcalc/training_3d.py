@@ -622,7 +622,7 @@ def main() -> None:
     )
     sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
-    transformer_block_time_components_dense: dict[str, float] = OrderedDict(
+    transformer_block_fwd_attn_components: dict[str, float] = OrderedDict(
         {
             # Attention
             "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
@@ -633,6 +633,26 @@ def main() -> None:
             "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight),
             "Post Attn RS": rs_time_s,
             "Post Attn Residual": hbm_load_store_time_s,
+        }
+    )
+    transformer_block_bwd_attn_components: dict[str, float] = OrderedDict(
+        {
+            # Attention
+            "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
+            "RoPE": hbm_load_store_time_s,  # RoPE approximation
+            "Pre Attn RS": rs_time_s,
+            "QKV Proj": compute_gemm_time_s(model_repr.qkv_weight) * 2,
+            "SDPA": sdpa_time * 2,
+            "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight) * 2,
+            "Post Attn AG": ag_time_s,
+            "Post Attn Residual": hbm_load_store_time_s,
+        }
+    )
+
+    transformer_block_fwd_time_components_dense: dict[str, float] = OrderedDict(
+        {
+            # Attention
+            **transformer_block_fwd_attn_components,
             # MLP
             "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
             "Pre MLP AG": ag_time_s,
@@ -642,10 +662,26 @@ def main() -> None:
             "Post MLP Residual": hbm_load_store_time_s,
         }
     )
-    if model_repr.parallelism_cfg.pp > 1:
-        transformer_block_time_components_dense["Activation Send"] = activation_send_time_s
+    transformer_block_bwd_time_components_dense: dict[str, float] = OrderedDict(
+        {
+            # Attention
+            **transformer_block_bwd_attn_components,
+            # MLP
+            "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
+            "Pre MLP RS": rs_time_s,
+            "MLP Up Proj": compute_gemm_time_s(model_repr.mlp_up_weight) * 2,
+            "MLP Down Proj": compute_gemm_time_s(model_repr.mlp_down_weight) * 2,
+            "Post MLP AG": ag_time_s,
+            "Post MLP Residual": hbm_load_store_time_s,
+        }
+    )
 
-    transformer_block_time_components_moe: dict[str, float] = {}
+    if model_repr.parallelism_cfg.pp > 1:
+        transformer_block_fwd_time_components_dense["Activation Send"] = activation_send_time_s
+        transformer_block_bwd_time_components_dense["Activation Send"] = activation_send_time_s
+
+    transformer_block_fwd_time_components_moe: dict[str, float] = {}
+    transformer_block_bwd_time_components_moe: dict[str, float] = {}
     if model_repr.moe_cfg is not None:
         assert model_repr.parallelism_cfg.expert_mesh is not None
 
@@ -683,17 +719,10 @@ def main() -> None:
         )
 
         assert model_repr.router_weight is not None
-        transformer_block_time_components_moe: dict[str, float] = OrderedDict(  # type: ignore[no-redef]
+        transformer_block_fwd_time_components_moe: dict[str, float] = OrderedDict(  # type: ignore[no-redef]
             {
                 # Attention
-                "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
-                "RoPE": hbm_load_store_time_s,  # RoPE approximation
-                "Pre Attn AG": ag_time_s,
-                "QKV Proj": compute_gemm_time_s(model_repr.qkv_weight),
-                "SDPA": sdpa_time,
-                "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight),
-                "Post Attn RS": rs_time_s,
-                "Post Attn Residual": hbm_load_store_time_s,
+                **transformer_block_fwd_attn_components,
                 # MLP
                 "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
                 "Router": compute_gemm_time_s(model_repr.router_weight),
@@ -730,28 +759,81 @@ def main() -> None:
                 "Post MLP Residual": hbm_load_store_time_s,
             }
         )
+        transformer_block_bwd_time_components_moe: dict[str, float] = OrderedDict(  # type: ignore[no-redef]
+            {
+                # Attention
+                **transformer_block_bwd_attn_components,
+                # MLP
+                "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
+                "Router": compute_gemm_time_s(model_repr.router_weight) * 2,
+                # bunch of router operations that are hard to project and
+                # are highly implementation dependent.
+                "Pre MLP A2A": a2a_time_s,
+                "Pre MLP RS": get_expert_tp_reduce_scatter_comm_time_s(
+                    size=expert_activation_size,
+                    parallel_config=model_repr.parallelism_cfg,
+                    machine_spec=machine_spec,
+                ),
+                "MLP Up Proj": compute_expert_gemm_time_s(
+                    n_tokens_per_expert=expert_capacity,
+                    weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
+                )
+                * 2,
+                "Glu Act": 3  # read 2, write 1
+                * (
+                    n_local_experts
+                    * expert_capacity
+                    * model_repr.moe_cfg.expert_inter_sz
+                    * safe_divide(model_repr.bits_per_parameter, 8)
+                )
+                / machine_spec.device_spec.mem_bandwidth_bytes_per_sec,
+                "MLP Down Proj": compute_expert_gemm_time_s(
+                    n_tokens_per_expert=expert_capacity,
+                    weight_repr=model_repr.mlp_down_exp_weight,  # type: ignore[arg-type]
+                )
+                * 2,
+                "Post MLP AG": get_expert_tp_all_gather_comm_time_s(
+                    size=expert_activation_size,
+                    parallel_config=model_repr.parallelism_cfg,
+                    machine_spec=machine_spec,
+                ),
+                "Post MLP A2A": a2a_time_s,
+                "Post MLP Residual": hbm_load_store_time_s,
+            }
+        )
         if model_repr.parallelism_cfg.pp > 1:
-            transformer_block_time_components_moe["Activation Send"] = activation_send_time_s
+            transformer_block_fwd_time_components_moe["Activation Send"] = activation_send_time_s
+            transformer_block_bwd_time_components_moe["Activation Send"] = activation_send_time_s
 
     print()
 
-    transformer_block_time_summaries: dict[str, tuple[float, dict[str, float]]] = {}
+    transformer_block_time_summaries: dict[
+        str, tuple[float, tuple[dict[str, float], dict[str, float]]]
+    ] = {}
     moe_layer_ratio = model_repr.moe_cfg.moe_frequency if model_repr.moe_cfg else 0
     if moe_layer_ratio < 1:
         transformer_block_time_summaries["Dense"] = (
             1 - moe_layer_ratio,
-            transformer_block_time_components_dense,
+            (
+                transformer_block_fwd_time_components_dense,
+                transformer_block_bwd_time_components_dense,
+            ),
         )
     if moe_layer_ratio > 0:
         transformer_block_time_summaries["MoE"] = (
             moe_layer_ratio,
-            transformer_block_time_components_moe,
+            (
+                transformer_block_fwd_time_components_moe,
+                transformer_block_bwd_time_components_moe,
+            ),
         )
 
     for block_type, (
         weight,
-        transformer_block_time_components,
+        (transformer_block_fwd_time_components, transformer_block_bwd_time_components),
     ) in transformer_block_time_summaries.items():
+        # for now just printing forward components
+        transformer_block_time_components = transformer_block_fwd_time_components
         print_h2_header(f"TRANSFORMER BLOCK COMPONENTS ({block_type}, weight={weight})")
         total_transformer_block_time_s = sum(transformer_block_time_components.values())
 
@@ -781,15 +863,25 @@ def main() -> None:
         print()
 
     transformer_block_fwd_time = sum(
-        weight * sum(components.values())
-        for weight, components in transformer_block_time_summaries.values()
+        weight * sum(fwd_components.values())
+        for weight, (fwd_components, bwd_components) in transformer_block_time_summaries.values()
     )
-    transformer_block_bwd_time = {
-        ActivationCheckpointingType.NONE: 2 * transformer_block_fwd_time,
-        ActivationCheckpointingType.SELECTIVE: 2 * transformer_block_fwd_time,
-        ActivationCheckpointingType.SUPER_SELECTIVE: 2 * transformer_block_fwd_time,
-        ActivationCheckpointingType.FULL: 3 * transformer_block_fwd_time,  # extra fwd
-    }[model_repr.act_ckpting_type]
+    transformer_block_bwd_time = (
+        sum(
+            weight * sum(bwd_components.values())
+            for weight, (
+                fwd_components,
+                bwd_components,
+            ) in transformer_block_time_summaries.values()
+        )
+        + {
+            ActivationCheckpointingType.NONE: 0,
+            ActivationCheckpointingType.SELECTIVE: 0,
+            ActivationCheckpointingType.SUPER_SELECTIVE: 0,
+            ActivationCheckpointingType.FULL: transformer_block_fwd_time,  # extra fwd
+        }[model_repr.act_ckpting_type]
+    )
+
     n_fwds = n_microbatches_per_mp_rank * layers_per_pp_stage
     n_bwds = n_fwds
 
@@ -826,7 +918,8 @@ def main() -> None:
 
     iteration_time_components: dict[str, float] = OrderedDict(
         {
-            "Transformer Block": transformer_block_time,
+            "Transformer Block (fwd)": n_fwds * transformer_block_fwd_time,
+            "Transformer Block (bwd)": n_bwds * transformer_block_bwd_time,
             "DP All-Gather": dp_ag_time,
             "DP Reduce-Scatter": dp_rs_time,
             "Pipeline Bubble": pipeline_bubble_time,
@@ -854,7 +947,7 @@ def main() -> None:
         bar = "█" * bar_length
 
         print(
-            f"  {component_name.ljust(20)} {color}{time_ms:8.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
+            f"  {component_name.ljust(25)} {color}{time_ms:8.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
         )
 
     print()
