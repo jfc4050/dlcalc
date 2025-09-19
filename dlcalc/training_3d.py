@@ -610,16 +610,16 @@ def main() -> None:
     )
 
     # SDPA time
-    sdpa_flops = safe_divide(model_repr.n_q_heads, model_repr.parallelism_cfg.tp) * sum(
-        [
-            # Q @ K.T
-            2
-            * safe_divide(sequence_len, model_repr.parallelism_cfg.cp)
-            * model_repr.head_dim
-            * sequence_len,
-            # A @ V
-            2 * sequence_len * sequence_len * model_repr.head_dim,
-        ]
+    sdpa_flops = (
+        safe_divide(sequence_len, model_repr.parallelism_cfg.cp)
+        * model_repr.microbatch_sz
+        * safe_divide(model_repr.n_q_heads, model_repr.parallelism_cfg.tp)
+        * sum(
+            [
+                2 * model_repr.head_dim * sequence_len,  # Q @ K.T
+                2 * sequence_len * model_repr.head_dim,  # A @ V
+            ]
+        )
     )
     sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
