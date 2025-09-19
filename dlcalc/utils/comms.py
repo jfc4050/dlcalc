@@ -15,7 +15,7 @@ from enum import Enum
 
 from .configurations import CrossDCConfig
 from .data import Size
-from .hardware import MachineSpec
+from .hardware import LinkSpec, MachineSpec
 from .model_3d import ParallelConfig
 
 
@@ -33,14 +33,14 @@ class ParallelismType(Enum):
     ETP = 6  # Expert Tensor Parallel
 
 
-def _get_effective_bw(
+def _get_effective_link_spec(
     *,
     parallelism_type: ParallelismType,
     parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
     is_expert_comm: bool,
-) -> float:
-    """Calculate effective bandwidth for a given parallelism type.
+) -> LinkSpec:
+    """Calculate effective link specification for a given parallelism type.
 
     Few things we need to figure out:
 
@@ -107,13 +107,17 @@ def _get_effective_bw(
         product_including_current *= parallelism_values[parallelism_type]
         product_after_current *= parallelism_values[parallelism_type]
 
-    if product_including_current <= n_devices_per_node:  # use intra-node link (assume no sharing)
-        return machine_spec.intra_node_connect.unidirectional_bw_bytes_per_sec
+    comm_has_internode_component = product_including_current > n_devices_per_node
 
-    # otherwise, use inter-node link
-    base_bw = machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
-
-    return base_bw / n_devices_per_node
+    if comm_has_internode_component:
+        return LinkSpec(
+            unidirectional_bw_bytes_per_sec=int(
+                machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / n_devices_per_node
+            ),
+            latency_sec=machine_spec.inter_node_connect.latency_sec,
+        )
+    else:
+        return machine_spec.intra_node_connect
 
 
 def get_tp_reduce_scatter_comm_time_s(
@@ -147,13 +151,21 @@ def get_dp_reduce_scatter_latency_term_s(
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
+    effective_link_spec = _get_effective_link_spec(
+        parallelism_type=ParallelismType.DP
+        if parallel_config.expert_mesh is None
+        else ParallelismType.EDP,
+        parallel_config=parallel_config,
+        machine_spec=machine_spec,
+        is_expert_comm=parallel_config.expert_mesh is not None,
+    )
     return _ring_ag_or_rs_latency_term_s(
         # approximation: we assume most of the parameters are MoE parameters, and calculate
         # just for those. for most models this is good enough.
         n_participants=parallel_config.dp
         if parallel_config.expert_mesh is None
         else parallel_config.expert_mesh.dp,
-        link_latency_s=machine_spec.inter_node_connect.latency_sec,
+        link_latency_s=effective_link_spec.latency_sec,
     )
 
 
@@ -165,21 +177,20 @@ def get_dp_reduce_scatter_bw_term_s(
     """assumes ring algorithm."""
     # approximation: we assume most of the parameters are MoE parameters, and calculate
     # just for those. for most models this is good enough.
+    effective_link_spec = _get_effective_link_spec(
+        parallelism_type=ParallelismType.DP
+        if parallel_config.expert_mesh is None
+        else ParallelismType.EDP,
+        parallel_config=parallel_config,
+        machine_spec=machine_spec,
+        is_expert_comm=parallel_config.expert_mesh is not None,
+    )
     return _ring_ag_or_rs_bw_term_s(
         size,
         n_participants=parallel_config.dp
         if parallel_config.expert_mesh is None
         else parallel_config.expert_mesh.dp,
-        unidirectional_link_bw_bytes_per_sec=int(
-            _get_effective_bw(
-                parallelism_type=ParallelismType.DP
-                if parallel_config.expert_mesh is None
-                else ParallelismType.EDP,
-                parallel_config=parallel_config,
-                machine_spec=machine_spec,
-                is_expert_comm=parallel_config.expert_mesh is not None,
-            )
-        ),
+        unidirectional_link_bw_bytes_per_sec=effective_link_spec.unidirectional_bw_bytes_per_sec,
     )
 
 
@@ -208,13 +219,21 @@ def get_dp_all_gather_latency_term_s(
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
+    effective_link_spec = _get_effective_link_spec(
+        parallelism_type=ParallelismType.DP
+        if parallel_config.expert_mesh is None
+        else ParallelismType.EDP,
+        parallel_config=parallel_config,
+        machine_spec=machine_spec,
+        is_expert_comm=parallel_config.expert_mesh is not None,
+    )
     return _ring_ag_or_rs_latency_term_s(
         # approximation: we assume most of the parameters are MoE parameters, and calculate
         # just for those. for most models this is good enough.
         n_participants=parallel_config.dp
         if parallel_config.expert_mesh is None
         else parallel_config.expert_mesh.dp,
-        link_latency_s=machine_spec.inter_node_connect.latency_sec,
+        link_latency_s=effective_link_spec.latency_sec,
     )
 
 
@@ -224,6 +243,14 @@ def get_dp_all_gather_bw_term_s(
     machine_spec: MachineSpec,
 ) -> float:
     """assumes ring algorithm."""
+    effective_link_spec = _get_effective_link_spec(
+        parallelism_type=ParallelismType.DP
+        if parallel_config.expert_mesh is None
+        else ParallelismType.EDP,
+        parallel_config=parallel_config,
+        machine_spec=machine_spec,
+        is_expert_comm=parallel_config.expert_mesh is not None,
+    )
     # approximation: we assume most of the parameters are MoE parameters, and calculate
     # just for those. for most models this is good enough.
     return _ring_ag_or_rs_bw_term_s(
@@ -231,16 +258,7 @@ def get_dp_all_gather_bw_term_s(
         n_participants=parallel_config.dp
         if parallel_config.expert_mesh is None
         else parallel_config.expert_mesh.dp,
-        unidirectional_link_bw_bytes_per_sec=int(
-            _get_effective_bw(
-                parallelism_type=ParallelismType.DP
-                if parallel_config.expert_mesh is None
-                else ParallelismType.EDP,
-                parallel_config=parallel_config,
-                machine_spec=machine_spec,
-                is_expert_comm=parallel_config.expert_mesh is not None,
-            )
-        ),
+        unidirectional_link_bw_bytes_per_sec=effective_link_spec.unidirectional_bw_bytes_per_sec,
     )
 
 
@@ -290,22 +308,20 @@ def _get_ring_tp_ag_or_rs_comm_time_s(
     parallel_config: ParallelConfig,
     is_expert_comm: bool = False,
 ) -> float:
+    effective_link_spec = _get_effective_link_spec(
+        parallelism_type=ParallelismType.ETP if is_expert_comm else ParallelismType.TP,
+        parallel_config=parallel_config,
+        machine_spec=machine_spec,
+        is_expert_comm=is_expert_comm,
+    )
     lat_term_s = _ring_ag_or_rs_latency_term_s(
         n_participants=n_participants,
-        # TODO. need to fix
-        link_latency_s=machine_spec.intra_node_connect.latency_sec,
+        link_latency_s=effective_link_spec.latency_sec,
     )
     bw_term_s = _ring_ag_or_rs_bw_term_s(
         size,
         n_participants=n_participants,
-        unidirectional_link_bw_bytes_per_sec=int(
-            _get_effective_bw(
-                parallelism_type=ParallelismType.ETP if is_expert_comm else ParallelismType.TP,
-                parallel_config=parallel_config,
-                machine_spec=machine_spec,
-                is_expert_comm=is_expert_comm,
-            )
-        ),
+        unidirectional_link_bw_bytes_per_sec=effective_link_spec.unidirectional_bw_bytes_per_sec,
     )
 
     return bw_term_s + lat_term_s
