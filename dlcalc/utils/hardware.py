@@ -114,9 +114,30 @@ class MachineSpec:
                     unidirectional_bw_bytes_per_sec=int(900e9),
                     latency_sec=3e-6,  # TODO.
                 ),
+                # EFAv4
                 # https://aws.amazon.com/ec2/instance-types/p6/
                 inter_node_connect=LinkSpec(
                     unidirectional_bw_bytes_per_sec=int(400e9),
+                    latency_sec=EFA_LATENCY_S,
+                ),
+            ),
+            "u-p6e-gb200x72": MachineSpec(
+                n_devices=72,
+                device_spec=DeviceSpec(
+                    peak_flops=int(2250e12),
+                    # 180GiB HBM3e
+                    mem_bandwidth_bytes_per_sec=int(4916e9),
+                    mem_capacity_bytes=180 * (1024**3),
+                ),
+                # NVLink 5
+                intra_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(900e9),
+                    latency_sec=3e-6,  # TODO.
+                ),
+                # EFAv4
+                # https://aws.amazon.com/ec2/instance-types/p6/
+                inter_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(3600e9),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
