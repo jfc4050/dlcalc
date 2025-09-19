@@ -9,6 +9,7 @@ import yaml
 
 from dlcalc.utils.comms import (
     get_all_to_all_comm_time_s,
+    get_cp_ring_exchange_comm_time_s,
     get_cross_dc_dp_all_gather_comm_time_s,
     get_cross_dc_dp_reduce_scatter_comm_time_s,
     get_dp_all_gather_bw_term_s,
@@ -622,17 +623,38 @@ def main() -> None:
     )
     sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
 
-    transformer_block_time_components_dense: dict[str, float] = OrderedDict(
+    transformer_block_attn_time_components: dict[str, float] = OrderedDict(
         {
             # Attention
             "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
             "RoPE": hbm_load_store_time_s,  # RoPE approximation
             "Pre Attn AG": ag_time_s,
             "QKV Proj": compute_gemm_time_s(model_repr.qkv_weight),
+            # ring exchange of KV heads. most implementations will overlap it
+            # with attention computation, but we don't account for that in the modeling.
+            "SDPA Ring Exchange": get_cp_ring_exchange_comm_time_s(
+                size=Size(
+                    2
+                    * model_repr.sequence_len
+                    * model_repr.microbatch_sz
+                    * model_repr.n_kv_heads
+                    * model_repr.head_dim,
+                    bits_per_element=model_repr.bits_per_parameter,
+                ),
+                parallel_config=model_repr.parallelism_cfg,
+                machine_spec=machine_spec,
+            ),
             "SDPA": sdpa_time,
             "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight),
             "Post Attn RS": rs_time_s,
             "Post Attn Residual": hbm_load_store_time_s,
+        }
+    )
+
+    transformer_block_time_components_dense: dict[str, float] = OrderedDict(
+        {
+            # Attention
+            **transformer_block_attn_time_components,
             # MLP
             "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
             "Pre MLP AG": ag_time_s,
@@ -686,14 +708,7 @@ def main() -> None:
         transformer_block_time_components_moe: dict[str, float] = OrderedDict(  # type: ignore[no-redef]
             {
                 # Attention
-                "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
-                "RoPE": hbm_load_store_time_s,  # RoPE approximation
-                "Pre Attn AG": ag_time_s,
-                "QKV Proj": compute_gemm_time_s(model_repr.qkv_weight),
-                "SDPA": sdpa_time,
-                "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight),
-                "Post Attn RS": rs_time_s,
-                "Post Attn Residual": hbm_load_store_time_s,
+                **transformer_block_attn_time_components,
                 # MLP
                 "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
                 "Router": compute_gemm_time_s(model_repr.router_weight),

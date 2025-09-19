@@ -146,6 +146,32 @@ def get_tp_all_gather_comm_time_s(
     )
 
 
+def get_cp_ring_exchange_comm_time_s(
+    size: Size, parallel_config: ParallelConfig, machine_spec: MachineSpec
+) -> float:
+    """assumes ring algorithm."""
+
+    effective_link_spec = _get_effective_link_spec(
+        parallelism_type=ParallelismType.CP,
+        parallel_config=parallel_config,
+        machine_spec=machine_spec,
+        is_expert_comm=False,
+    )
+
+    latency_term_s = _ring_ag_or_rs_latency_term_s(
+        n_participants=parallel_config.cp,
+        link_latency_s=effective_link_spec.latency_sec,
+    )
+
+    bw_term_s = _ring_ag_or_rs_bw_term_s(
+        size,
+        n_participants=parallel_config.cp,
+        unidirectional_link_bw_bytes_per_sec=effective_link_spec.unidirectional_bw_bytes_per_sec,
+    )
+
+    return latency_term_s + bw_term_s
+
+
 def get_dp_reduce_scatter_latency_term_s(
     parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
