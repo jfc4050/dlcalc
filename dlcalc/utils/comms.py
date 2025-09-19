@@ -38,7 +38,6 @@ def _get_effective_link_spec(
     parallelism_type: ParallelismType,
     parallel_config: ParallelConfig,
     machine_spec: MachineSpec,
-    is_expert_comm: bool,
 ) -> LinkSpec:
     """Calculate effective link specification for a given parallelism type.
 
@@ -66,14 +65,13 @@ def _get_effective_link_spec(
         parallelism_type: The type of parallelism for which to calculate bandwidth
         parallel_config: The parallelism configuration
         machine_spec: The machine specification
-        is_expert_comm: Whether this is for expert parallelism communication
 
     Returns:
         Effective bandwidth in bytes per second
     """
     n_devices_per_node = machine_spec.n_devices
 
-    if is_expert_comm:
+    if parallelism_type in [ParallelismType.EDP, ParallelismType.EP, ParallelismType.ETP]:
         assert parallel_config.expert_mesh is not None
         parallelism_values = {
             ParallelismType.PP: parallel_config.pp,
@@ -87,7 +85,12 @@ def _get_effective_link_spec(
             ParallelismType.EP,
             ParallelismType.ETP,
         ]
-    else:
+    elif parallelism_type in [
+        ParallelismType.PP,
+        ParallelismType.DP,
+        ParallelismType.CP,
+        ParallelismType.TP,
+    ]:
         parallelism_values = {
             ParallelismType.PP: parallel_config.pp,
             ParallelismType.DP: parallel_config.dp,
@@ -95,11 +98,8 @@ def _get_effective_link_spec(
             ParallelismType.TP: parallel_config.tp,
         }
         hierarchy = [ParallelismType.PP, ParallelismType.DP, ParallelismType.CP, ParallelismType.TP]
-
-    if parallelism_type not in hierarchy:
-        raise AssertionError(
-            f"Parallelism type {parallelism_type} not found in hierarchy {hierarchy}."
-        )
+    else:
+        raise AssertionError(f"unhandled parallelism type {parallelism_type}.")
 
     product_including_current = parallelism_values[parallelism_type]
     product_after_current = 1
@@ -151,7 +151,6 @@ def get_cp_ring_exchange_comm_time_s(
         parallelism_type=ParallelismType.CP,
         parallel_config=parallel_config,
         machine_spec=machine_spec,
-        is_expert_comm=False,
     )
 
     latency_term_s = _ring_ag_or_rs_latency_term_s(
@@ -175,7 +174,6 @@ def get_pp_sendrecv_comm_time_s(
         parallelism_type=ParallelismType.PP,
         parallel_config=parallel_config,
         machine_spec=machine_spec,
-        is_expert_comm=False,
     )
 
     latency_term_s = effective_link_spec.latency_sec
@@ -195,7 +193,6 @@ def get_dp_reduce_scatter_latency_term_s(
         else ParallelismType.EDP,
         parallel_config=parallel_config,
         machine_spec=machine_spec,
-        is_expert_comm=parallel_config.expert_mesh is not None,
     )
     return _ring_ag_or_rs_latency_term_s(
         # approximation: we assume most of the parameters are MoE parameters, and calculate
@@ -221,7 +218,6 @@ def get_dp_reduce_scatter_bw_term_s(
         else ParallelismType.EDP,
         parallel_config=parallel_config,
         machine_spec=machine_spec,
-        is_expert_comm=parallel_config.expert_mesh is not None,
     )
     return _ring_ag_or_rs_bw_term_s(
         size,
@@ -263,7 +259,6 @@ def get_dp_all_gather_latency_term_s(
         else ParallelismType.EDP,
         parallel_config=parallel_config,
         machine_spec=machine_spec,
-        is_expert_comm=parallel_config.expert_mesh is not None,
     )
     return _ring_ag_or_rs_latency_term_s(
         # approximation: we assume most of the parameters are MoE parameters, and calculate
@@ -287,7 +282,6 @@ def get_dp_all_gather_bw_term_s(
         else ParallelismType.EDP,
         parallel_config=parallel_config,
         machine_spec=machine_spec,
-        is_expert_comm=parallel_config.expert_mesh is not None,
     )
     # approximation: we assume most of the parameters are MoE parameters, and calculate
     # just for those. for most models this is good enough.
@@ -350,7 +344,6 @@ def _get_ring_tp_ag_or_rs_comm_time_s(
         parallelism_type=ParallelismType.ETP if is_expert_comm else ParallelismType.TP,
         parallel_config=parallel_config,
         machine_spec=machine_spec,
-        is_expert_comm=is_expert_comm,
     )
     lat_term_s = _ring_ag_or_rs_latency_term_s(
         n_participants=n_participants,
