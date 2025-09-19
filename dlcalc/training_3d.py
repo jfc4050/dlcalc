@@ -670,6 +670,14 @@ def main() -> None:
             "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
             "Pre MLP AG": ag_time_s,
             "MLP Up Proj": compute_gemm_time_s(model_repr.mlp_up_weight),
+            "Glu Act": 3  # read 2, write 1
+            * (
+                model_repr.sequence_len
+                * model_repr.microbatch_sz
+                * safe_divide(model_repr.inter_sz, model_repr.parallelism_cfg.tp)
+                * safe_divide(model_repr.bits_per_parameter, 8)
+            )
+            / machine_spec.device_spec.mem_bandwidth_bytes_per_sec,
             "MLP Down Proj": compute_gemm_time_s(model_repr.mlp_down_weight),
             "Post MLP RS": rs_time_s,
             "Post MLP Residual": hbm_load_store_time_s,

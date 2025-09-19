@@ -16,8 +16,8 @@ import yaml
 @pytest.mark.parametrize(  # type: ignore[misc]
     "config_file,expected_mfu,expected_mem",
     [
-        ("examples/llama3_70b.yaml", 30.43, 31.965),
-        ("examples/llama3_70b_cross_dc.yaml", 29.79, 31.404),
+        ("examples/llama3_70b.yaml", 30.24, 31.965),
+        ("examples/llama3_70b_cross_dc.yaml", 29.61, 31.404),
         ("examples/gpt_oss_120b.yaml", 30.89, 51.155),
     ],
 )
