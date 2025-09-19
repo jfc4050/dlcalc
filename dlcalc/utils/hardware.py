@@ -14,13 +14,13 @@ class DeviceSpec:
 
 @dataclass
 class LinkSpec:
-    unidirectional_bw_bytes_per_sec: int
+    unidirectional_bw_bytes_per_sec: int  # per GPU
     latency_sec: float
 
     def __repr__(self) -> str:
         return json.dumps(
             {
-                "unidirectional bw": f"{self.unidirectional_bw_bytes_per_sec * 1e-9:.2f} GBps",
+                "unidirectional bw/GPU": f"{self.unidirectional_bw_bytes_per_sec * 1e-9:.2f} GBps",
                 "latency": f"{self.latency_sec * 1e6} us",
             }
         )
@@ -54,7 +54,7 @@ class MachineSpec:
                 ),
                 # EFA v1 - 4 x 100 Gbps
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(50e9),
+                    unidirectional_bw_bytes_per_sec=int(50e9 / 8),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -75,7 +75,7 @@ class MachineSpec:
                 ),
                 # EFA v1 - 4 x 100 Gbps
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(50e9),
+                    unidirectional_bw_bytes_per_sec=int(50e9 / 8),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -97,7 +97,7 @@ class MachineSpec:
                 ),
                 # EFA v2 - 32 x 100 Gbps
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(400e9),
+                    unidirectional_bw_bytes_per_sec=int(400e9 / 8),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -117,7 +117,7 @@ class MachineSpec:
                 # EFAv4
                 # https://aws.amazon.com/ec2/instance-types/p6/
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(400e9),
+                    unidirectional_bw_bytes_per_sec=int(400e9 / 8),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -137,7 +137,7 @@ class MachineSpec:
                 # EFAv4
                 # https://aws.amazon.com/ec2/instance-types/p6/
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(3600e9),
+                    unidirectional_bw_bytes_per_sec=int(3600e9 / 72),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -159,7 +159,7 @@ class MachineSpec:
                 ),
                 # EFA v2
                 inter_node_connect=LinkSpec(
-                    unidirectional_bw_bytes_per_sec=int(200e9),
+                    unidirectional_bw_bytes_per_sec=int(200e9 / 32),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),

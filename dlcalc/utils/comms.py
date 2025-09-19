@@ -109,15 +109,11 @@ def _get_effective_link_spec(
 
     comm_has_internode_component = product_including_current > n_devices_per_node
 
-    if comm_has_internode_component:
-        return LinkSpec(
-            unidirectional_bw_bytes_per_sec=int(
-                machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / n_devices_per_node
-            ),
-            latency_sec=machine_spec.inter_node_connect.latency_sec,
-        )
-    else:
-        return machine_spec.intra_node_connect
+    return (
+        machine_spec.inter_node_connect
+        if comm_has_internode_component
+        else machine_spec.intra_node_connect
+    )
 
 
 def get_tp_reduce_scatter_comm_time_s(
@@ -168,6 +164,22 @@ def get_cp_ring_exchange_comm_time_s(
         n_participants=parallel_config.cp,
         unidirectional_link_bw_bytes_per_sec=effective_link_spec.unidirectional_bw_bytes_per_sec,
     )
+
+    return latency_term_s + bw_term_s
+
+
+def get_pp_sendrecv_comm_time_s(
+    size: Size, parallel_config: ParallelConfig, machine_spec: MachineSpec
+) -> float:
+    effective_link_spec = _get_effective_link_spec(
+        parallelism_type=ParallelismType.PP,
+        parallel_config=parallel_config,
+        machine_spec=machine_spec,
+        is_expert_comm=False,
+    )
+
+    latency_term_s = effective_link_spec.latency_sec
+    bw_term_s = size.bytes() / effective_link_spec.unidirectional_bw_bytes_per_sec
 
     return latency_term_s + bw_term_s
 
@@ -381,9 +393,7 @@ def get_all_to_all_comm_time_s(
         alltoall_internode_fraction = (alltoall_n_nodes - 1) / alltoall_n_nodes
         bw_term_s = (
             (size.bytes() / n_participants) * alltoall_internode_fraction * (n_participants - 1)
-        ) / (
-            machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / machine_spec.n_devices
-        )
+        ) / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
     else:
         bw_term_s = (
             (size.bytes() / n_participants) * (n_participants - 1)
@@ -498,7 +508,7 @@ def _get_cross_dc_dp_all_gather_or_reduce_scatter_comm_time_s(
     # rate limit any faster links that come after it.
     effective_bw = min(
         cross_dc_bw_per_ring,
-        machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec / machine_spec.n_devices,
+        machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec,
     )
     bw_term = _ring_ag_or_rs_bw_term_s(
         size=size,

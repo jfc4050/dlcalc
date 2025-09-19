@@ -20,6 +20,7 @@ from dlcalc.utils.comms import (
     get_dp_reduce_scatter_latency_term_s,
     get_expert_tp_all_gather_comm_time_s,
     get_expert_tp_reduce_scatter_comm_time_s,
+    get_pp_sendrecv_comm_time_s,
     get_tp_all_gather_comm_time_s,
     get_tp_reduce_scatter_comm_time_s,
 )
@@ -365,8 +366,18 @@ def main() -> None:
     print_kv("Activation Size", str(activation_size), key_width=30)
 
     print_h1_header("COMMUNICATION: PIPELINE PARALLELISM")
-    activation_send_time_s = (
-        activation_size.bytes() / machine_spec.inter_node_connect.unidirectional_bw_bytes_per_sec
+    activation_send_time_s = get_pp_sendrecv_comm_time_s(
+        Size(
+            numel=safe_divide(
+                sequence_len,
+                model_repr.parallelism_cfg.cp * model_repr.parallelism_cfg.tp,
+            )
+            * microbatch_sz
+            * hidden_sz,
+            bits_per_element=model_repr.bits_per_parameter,
+        ),
+        parallel_config=model_repr.parallelism_cfg,
+        machine_spec=machine_spec,
     )
     print_kv("PP Send/Recv Time", f"{activation_send_time_s * 1000:.3f} ms", key_width=30)
     print_kv("Activation Size", str(activation_size), key_width=30)
