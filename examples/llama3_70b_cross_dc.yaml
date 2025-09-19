@@ -34,6 +34,6 @@ hardware:
   node_type: p4d.24xlarge
 
 cross_dc:
-  n_dcs: 2
+  n_dcs: 4
   interconnect_bandwidth_gbps: 100000
   interconnect_latency_s: 0.005
