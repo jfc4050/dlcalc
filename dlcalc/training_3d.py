@@ -24,7 +24,12 @@ from dlcalc.utils.comms import (
     get_tp_all_gather_comm_time_s,
     get_tp_reduce_scatter_comm_time_s,
 )
-from dlcalc.utils.compute import compute_gemm_flops
+from dlcalc.utils.compute import (
+    compute_gemm_flops,
+    expert_gemm_time_s,
+    gemm_time_s,
+    sdpa_time_s,
+)
 from dlcalc.utils.configurations import ActivationCheckpointingType, CrossDCConfig
 from dlcalc.utils.data import Size, TensorRepr
 from dlcalc.utils.hardware import MachineSpec
@@ -46,8 +51,6 @@ from dlcalc.utils.printing import (
     print_section_separator,
     print_success,
 )
-
-ASSUMED_GEMM_UTIL = 0.7
 
 
 def main() -> None:
@@ -596,15 +599,10 @@ def main() -> None:
         "   common issues include CPU boundedness, jitter, stragglers, \n  "
         "   dataloading, etc. \n  "
     )
-    n_tokens = model_repr.microbatch_sz * model_repr.sequence_len
-
-    def compute_gemm_time_s(weight_repr: TensorRepr) -> float:
-        flops = compute_gemm_flops(
-            n_tokens=safe_divide(n_tokens, model_repr.parallelism_cfg.cp),
-            weight_shape=weight_repr.shape(partitioned=True),
-        )
-        return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
-
+    tp_region_n_tokens = safe_divide(
+        model_repr.microbatch_sz * model_repr.sequence_len,
+        model_repr.parallelism_cfg.cp,
+    )
     ag_time_s = get_tp_all_gather_comm_time_s(
         size=activation_size,
         parallel_config=model_repr.parallelism_cfg,
@@ -615,32 +613,20 @@ def main() -> None:
         parallel_config=model_repr.parallelism_cfg,
         machine_spec=machine_spec,
     )
-
     hbm_load_store_time_s = (
         2 * activation_size.bytes() / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
     )
 
-    # SDPA time
-    sdpa_flops = (
-        safe_divide(sequence_len, model_repr.parallelism_cfg.cp)
-        * model_repr.microbatch_sz
-        * safe_divide(model_repr.n_q_heads, model_repr.parallelism_cfg.tp)
-        * sum(
-            [
-                2 * model_repr.head_dim * sequence_len,  # Q @ K.T
-                2 * sequence_len * model_repr.head_dim,  # A @ V
-            ]
-        )
-    )
-    sdpa_time = sdpa_flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
-
     transformer_block_attn_time_components: dict[str, float] = OrderedDict(
         {
-            # Attention
             "Pre Attn Norm": hbm_load_store_time_s,  # norm approximation
             "RoPE": hbm_load_store_time_s,  # RoPE approximation
             "Pre Attn AG": ag_time_s,
-            "QKV Proj": compute_gemm_time_s(model_repr.qkv_weight),
+            "QKV Proj": gemm_time_s(
+                n_tokens=tp_region_n_tokens,
+                weight_repr=model_repr.qkv_weight,
+                machine_spec=machine_spec,
+            ),
             # ring exchange of KV heads. most implementations will overlap it
             # with attention computation, but we don't account for that in the modeling.
             "SDPA Ring Exchange": get_cp_ring_exchange_comm_time_s(
@@ -655,8 +641,18 @@ def main() -> None:
                 parallel_config=model_repr.parallelism_cfg,
                 machine_spec=machine_spec,
             ),
-            "SDPA": sdpa_time,
-            "Attn Out Proj": compute_gemm_time_s(model_repr.attn_out_weight),
+            "SDPA": sdpa_time_s(
+                n_tokens=tp_region_n_tokens,
+                ctxlen=model_repr.sequence_len,
+                n_heads=safe_divide(model_repr.n_q_heads, model_repr.parallelism_cfg.tp),
+                head_dim=model_repr.head_dim,
+                machine_spec=machine_spec,
+            ),
+            "Attn Out Proj": gemm_time_s(
+                n_tokens=tp_region_n_tokens,
+                weight_repr=model_repr.attn_out_weight,
+                machine_spec=machine_spec,
+            ),
             "Post Attn RS": rs_time_s,
             "Post Attn Residual": hbm_load_store_time_s,
         }
@@ -667,9 +663,13 @@ def main() -> None:
             # Attention
             **transformer_block_attn_time_components,
             # MLP
-            "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
+            "Pre MLP Norm": hbm_load_store_time_s,
             "Pre MLP AG": ag_time_s,
-            "MLP Up Proj": compute_gemm_time_s(model_repr.mlp_up_weight),
+            "MLP Up Proj": gemm_time_s(
+                n_tokens=tp_region_n_tokens,
+                weight_repr=model_repr.mlp_up_weight,
+                machine_spec=machine_spec,
+            ),
             "Glu Act": 3  # read 2, write 1
             * (
                 model_repr.sequence_len
@@ -678,7 +678,11 @@ def main() -> None:
                 * safe_divide(model_repr.bits_per_parameter, 8)
             )
             / machine_spec.device_spec.mem_bandwidth_bytes_per_sec,
-            "MLP Down Proj": compute_gemm_time_s(model_repr.mlp_down_weight),
+            "MLP Down Proj": gemm_time_s(
+                n_tokens=tp_region_n_tokens,
+                weight_repr=model_repr.mlp_down_weight,
+                machine_spec=machine_spec,
+            ),
             "Post MLP RS": rs_time_s,
             "Post MLP Residual": hbm_load_store_time_s,
         }
@@ -689,24 +693,14 @@ def main() -> None:
     transformer_block_time_components_moe: dict[str, float] = {}
     if model_repr.moe_cfg is not None:
         assert model_repr.parallelism_cfg.expert_mesh is not None
+        assert model_repr.mlp_up_exp_weight is not None
+        assert model_repr.mlp_down_exp_weight is not None
 
-        expert_capacity = model_repr.expert_capacity()
         n_local_experts = safe_divide(
             model_repr.moe_cfg.n_experts,
             model_repr.parallelism_cfg.expert_mesh.ep,
         )
-
-        def compute_expert_gemm_time_s(n_tokens_per_expert: int, weight_repr: TensorRepr) -> float:
-            n_local_experts, *gemm_dims = weight_repr.shape(partitioned=True)
-            print(
-                f"n_local_experts: {n_local_experts} n_tokens: {n_tokens_per_expert} gemm_dims: {gemm_dims}"
-            )
-            flops = n_local_experts * compute_gemm_flops(
-                n_tokens=n_tokens_per_expert,
-                weight_shape=tuple(gemm_dims),
-            )
-            return flops / (machine_spec.device_spec.peak_flops * ASSUMED_GEMM_UTIL)
-
+        expert_capacity = model_repr.expert_capacity()
         a2a_time_s = get_all_to_all_comm_time_s(
             size=Size(
                 n_local_experts
@@ -724,13 +718,17 @@ def main() -> None:
         )
 
         assert model_repr.router_weight is not None
-        transformer_block_time_components_moe: dict[str, float] = OrderedDict(  # type: ignore[no-redef]
+        transformer_block_time_components_moe = OrderedDict(
             {
                 # Attention
                 **transformer_block_attn_time_components,
                 # MLP
-                "Pre MLP Norm": hbm_load_store_time_s,  # norm approximation
-                "Router": compute_gemm_time_s(model_repr.router_weight),
+                "Pre MLP Norm": hbm_load_store_time_s,
+                "Router": gemm_time_s(
+                    n_tokens=tp_region_n_tokens,
+                    weight_repr=model_repr.router_weight,
+                    machine_spec=machine_spec,
+                ),
                 # bunch of router operations that are hard to project and
                 # are highly implementation dependent.
                 "Pre MLP A2A": a2a_time_s,
@@ -739,9 +737,10 @@ def main() -> None:
                     parallel_config=model_repr.parallelism_cfg,
                     machine_spec=machine_spec,
                 ),
-                "MLP Up Proj": compute_expert_gemm_time_s(
+                "MLP Up Proj": expert_gemm_time_s(
                     n_tokens_per_expert=expert_capacity,
-                    weight_repr=model_repr.mlp_up_exp_weight,  # type: ignore[arg-type]
+                    weight_repr=model_repr.mlp_up_exp_weight,
+                    machine_spec=machine_spec,
                 ),
                 "Glu Act": 3  # read 2, write 1
                 * (
@@ -751,9 +750,10 @@ def main() -> None:
                     * safe_divide(model_repr.bits_per_parameter, 8)
                 )
                 / machine_spec.device_spec.mem_bandwidth_bytes_per_sec,
-                "MLP Down Proj": compute_expert_gemm_time_s(
+                "MLP Down Proj": expert_gemm_time_s(
                     n_tokens_per_expert=expert_capacity,
-                    weight_repr=model_repr.mlp_down_exp_weight,  # type: ignore[arg-type]
+                    weight_repr=model_repr.mlp_down_exp_weight,
+                    machine_spec=machine_spec,
                 ),
                 "Post MLP RS": get_expert_tp_reduce_scatter_comm_time_s(
                     size=expert_activation_size,
