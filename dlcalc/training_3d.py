@@ -592,12 +592,18 @@ def main() -> None:
     print_h1_header("PERFORMANCE: ITERATION TIME ANALYSIS")
     print_info(
         "NOTE: This is intended to give theoretical time estimates. \n  "
-        "Any gaps between this and observations will be a combination of: \n  "
+        "Any gaps between this and observations will be one or more of: \n  "
         "\n  "
-        "a) errors in the modeling. please cut an issue if you find one. \n  "
-        "b) implementation issues that you should consider fixing. \n  "
+        "a) implementation issues that you should consider fixing. \n  "
         "   common issues include CPU boundedness, jitter, stragglers, \n  "
-        "   dataloading, etc. \n  "
+        "   dataloading, etc. The tendency is for smaller models to expose more \n  "
+        "   of these types of issues. \n  "
+        "b) errors in the modeling. please cut an issue if you find one. \n  "
+        "   \n  "
+        "We strongly encourage users to not only look at the end MFU number. \n  "
+        "The users that get the most utility out of this tool will be the ones who  \n  "
+        "are able to look at things componentwise (with the help of a profiler)  \n  "
+        "and understand when and why results may deviate from predictions."
     )
     tp_region_n_tokens = safe_divide(
         model_repr.microbatch_sz * model_repr.sequence_len,
@@ -672,8 +678,7 @@ def main() -> None:
             ),
             "Glu Act": 3  # read 2, write 1
             * (
-                model_repr.sequence_len
-                * model_repr.microbatch_sz
+                tp_region_n_tokens
                 * safe_divide(model_repr.inter_sz, model_repr.parallelism_cfg.tp)
                 * safe_divide(model_repr.bits_per_parameter, 8)
             )
