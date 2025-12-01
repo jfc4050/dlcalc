@@ -66,7 +66,7 @@ class MachineSpec:
                     peak_flops=int(312e12),
                     # 80GiB HBM2e
                     mem_bandwidth_bytes_per_sec=int(2039e9),
-                    mem_capacity_bytes=40 * (1024**3),
+                    mem_capacity_bytes=80 * (1024**3),
                 ),
                 # NVLink 3
                 intra_node_connect=LinkSpec(
