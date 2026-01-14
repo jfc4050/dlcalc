@@ -39,6 +39,7 @@ from dlcalc.utils.printing import (
     _BOLD,
     _END,
     _GRAY,
+    _GREEN,
     format_number,
     get_color_by_percentage,
     get_color_by_time_ms,
@@ -856,16 +857,6 @@ def main() -> None:
     lm_head_time_per_microbatch = lm_head_fwd_time_s + lm_head_bwd_time_s
     lm_head_total_time = lm_head_time_per_microbatch * n_microbatches_per_mp_rank
 
-    # approximation: we'll assume all reductions are overlapped
-    # except for at the first pipeline stage, where they are completely exposed.
-    # Generally, for large training jobs where microbatch size is 1
-    # (i.e. not much computation to overlap with), the first pipeline stage's DP
-    # communication is almost completely exposed.
-    # VPP doesn't help much with this - even though in theory it allows some DP
-    # comms to be launched earlier, the DP costs are too expensive relative to final
-    # microbatch costs for this to make a significant difference.
-    # NOTE. this is an approximation when using EP, where there will be separate
-    # reduction groups for DP_exp and DP_nonexp.
     if cross_dc_config is not None:
         assert cross_dc_param_bucket_ag_time_s is not None
         assert cross_dc_grad_bucket_rs_time_s is not None
@@ -874,6 +865,13 @@ def main() -> None:
     else:
         dp_ag_time = param_bucket_all_gather_time_s * n_buckets
         dp_rs_time = grad_bucket_reduce_scatter_time_s * n_buckets
+
+    # AG is overlapped with the first forward microbatch through the PP stage.
+    # RS is overlapped with the last backward microbatch through the PP stage.
+    first_fwd_microbatch_time = layers_per_pp_stage * transformer_block_fwd_time
+    last_bwd_microbatch_time = layers_per_pp_stage * transformer_block_bwd_time
+    exposed_dp_ag = max(0.0, dp_ag_time - first_fwd_microbatch_time)
+    exposed_dp_rs = max(0.0, dp_rs_time - last_bwd_microbatch_time)
 
     # approximating optimizer step time as time to read/write states + optim states to/from HBM
     opt_step_time_s = (
@@ -887,8 +885,8 @@ def main() -> None:
             "Transformer Block": transformer_block_time,
             "Embedding Lookup": embedding_total_time,
             "LM Head Projection": lm_head_total_time,
-            "DP All-Gather": dp_ag_time,
-            "DP Reduce-Scatter": dp_rs_time,
+            "DP AG (exposed)": exposed_dp_ag,
+            "DP RS (exposed)": exposed_dp_rs,
             "Pipeline Bubble": pipeline_bubble_time,
             "Optimizer Step": opt_step_time_s,
         }
@@ -902,6 +900,11 @@ def main() -> None:
         iteration_time_components.items(), key=lambda x: x[1], reverse=True
     )
 
+    hidden_time: dict[str, float] = {
+        "DP AG (exposed)": dp_ag_time - exposed_dp_ag,
+        "DP RS (exposed)": dp_rs_time - exposed_dp_rs,
+    }
+
     for component_name, component_time_s in sorted_iteration_components:
         time_ms = component_time_s * 1000
         percentage = (component_time_s / iteration_time_s) * 100
@@ -909,12 +912,18 @@ def main() -> None:
         # Use color coding based on percentage
         color = get_color_by_percentage(percentage)
 
-        # Create a simple bar chart
+        # Create a bar chart; for DP comms, append green portion for hidden time
         bar_length = int(percentage / 2)  # Scale to max 50 chars
         bar = "█" * bar_length
+        hidden_s = hidden_time.get(component_name, 0.0)
+        hidden_bar = ""
+        if hidden_s > 0:
+            hidden_pct = (hidden_s / iteration_time_s) * 100
+            hidden_bar_length = max(1, int(hidden_pct / 2))
+            hidden_bar = f"{_GREEN}{'█' * hidden_bar_length}{_END}"
 
         print(
-            f"  {component_name.ljust(20)} {color}{time_ms:8.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}"
+            f"  {component_name.ljust(20)} {color}{time_ms:8.2f} ms{_END}  {percentage:5.1f}%  {_GRAY}{bar}{_END}{hidden_bar}"
         )
 
     print()

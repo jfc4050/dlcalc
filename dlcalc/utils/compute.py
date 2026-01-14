@@ -7,7 +7,7 @@ https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplic
 from dlcalc.utils.data import TensorRepr
 from dlcalc.utils.hardware import MachineSpec
 
-from .math import ceil_divide, product
+from .math import product
 
 
 def compute_gemm_flops(n_tokens: int, weight_shape: tuple[int, ...]) -> float:
@@ -21,11 +21,16 @@ def gemm_time_s(
     weight_repr: TensorRepr,
     machine_spec: MachineSpec,
 ) -> float:
-    flops = compute_gemm_flops(
-        n_tokens=n_tokens,
-        weight_shape=weight_repr.shape(partitioned=True),
-    )
-    return flops / (machine_spec.device_spec.peak_flops * machine_spec.device_spec.mamf)
+    weight_shape = weight_repr.shape(partitioned=True)
+    flops = compute_gemm_flops(n_tokens=n_tokens, weight_shape=weight_shape)
+    compute_time = flops / (machine_spec.device_spec.peak_flops * machine_spec.device_spec.mamf)
+
+    bytes_per_elt = weight_repr._bits_per_elt // 8
+    gemm_k, gemm_n = weight_shape
+    total_bytes = (n_tokens * gemm_k + gemm_k * gemm_n + n_tokens * gemm_n) * bytes_per_elt
+    memory_time = total_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
+
+    return max(compute_time, memory_time)
 
 
 def expert_gemm_time_s(
@@ -39,29 +44,17 @@ def expert_gemm_time_s(
         n_tokens=n_tokens_per_expert,
         weight_shape=tuple(gemm_dims),
     )
-    return flops / (machine_spec.device_spec.peak_flops * machine_spec.device_spec.mamf)
+    compute_time = flops / (machine_spec.device_spec.peak_flops * machine_spec.device_spec.mamf)
 
+    bytes_per_elt = weight_repr._bits_per_elt // 8
+    gemm_k, gemm_n = gemm_dims
+    per_expert_bytes = (
+        n_tokens_per_expert * gemm_k + gemm_k * gemm_n + n_tokens_per_expert * gemm_n
+    ) * bytes_per_elt
+    total_bytes = n_local_experts * per_expert_bytes
+    memory_time = total_bytes / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
 
-def compute_gemm_n_tiles(
-    n_tokens: int, weight_shape: tuple[int, ...], tile_shape: tuple[int, int, int]
-) -> int:
-    """get the total number of tiles for a GEMM. GEMMs can be tiled:
-    * along output dimension M
-    * along output dimension N
-    * along reduction dimension K (requires reduction)
-    """
-    gemm_m = n_tokens
-    gemm_k, gemm_n = weight_shape
-
-    # tile_m, tile_n = (256, 128) if gemm_m > gemm_n else (128, 256)
-    tile_m, tile_n = 128, 128
-    tile_k = gemm_k
-
-    return product(
-        ceil_divide(gemm_m, tile_m),
-        ceil_divide(gemm_n, tile_n),
-        ceil_divide(gemm_k, tile_k),
-    )
+    return max(compute_time, memory_time)
 
 
 def sdpa_time_s(
