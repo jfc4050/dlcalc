@@ -16,9 +16,9 @@ import yaml
 @pytest.mark.parametrize(  # type: ignore[misc]
     "config_file,expected_mfu,expected_mem",
     [
-        ("examples/llama3_70b.yaml", 29.7, 31.965),
-        ("examples/llama3_70b_cross_dc.yaml", 29.1, 31.404),
-        ("examples/gpt_oss_120b.yaml", 24.1, 51.155),
+        ("examples/llama3_70b.yaml", 32.64, 31.965),
+        ("examples/llama3_70b_cross_dc.yaml", 31.9, 31.404),
+        ("examples/gpt_oss_120b.yaml", 27.1, 51.155),
     ],
 )
 def test_output_format(config_file: str, expected_mfu: float, expected_mem: float) -> None:

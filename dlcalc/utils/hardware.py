@@ -10,6 +10,9 @@ class DeviceSpec:
     peak_flops: int
     mem_bandwidth_bytes_per_sec: int
     mem_capacity_bytes: int
+    # Maximum Achievable Model FLOPS factor (0.0-1.0)
+    # https://github.com/stas00/ml-engineering/blob/master/compute/accelerator/README.md#maximum-achievable-matmul-flops-comparison-table
+    mamf: float
 
 
 @dataclass
@@ -46,6 +49,7 @@ class MachineSpec:
                     # 40GiB HBM2
                     mem_bandwidth_bytes_per_sec=int(1555e9),
                     mem_capacity_bytes=40 * (1024**3),
+                    mamf=0.869,
                 ),
                 # NVLink 3
                 intra_node_connect=LinkSpec(
@@ -67,6 +71,7 @@ class MachineSpec:
                     # 80GiB HBM2e
                     mem_bandwidth_bytes_per_sec=int(2039e9),
                     mem_capacity_bytes=80 * (1024**3),
+                    mamf=0.869,
                 ),
                 # NVLink 3
                 intra_node_connect=LinkSpec(
@@ -89,6 +94,7 @@ class MachineSpec:
                     # 80 GiB HBM3
                     mem_bandwidth_bytes_per_sec=int(3350e9),
                     mem_capacity_bytes=80 * (1024**3),
+                    mamf=0.803,
                 ),
                 # NVLink 4
                 intra_node_connect=LinkSpec(
@@ -108,6 +114,7 @@ class MachineSpec:
                     # 180GiB HBM3e
                     mem_bandwidth_bytes_per_sec=int(4916e9),
                     mem_capacity_bytes=180 * (1024**3),
+                    mamf=0.776,
                 ),
                 # NVLink 5
                 intra_node_connect=LinkSpec(
@@ -127,6 +134,7 @@ class MachineSpec:
                     peak_flops=int(2500e12),
                     mem_bandwidth_bytes_per_sec=int(8192e9),
                     mem_capacity_bytes=284 * (1024**3),
+                    mamf=0.729,  # don't have GB300 values, using GB200 MAMF for now
                 ),
                 intra_node_connect=LinkSpec(
                     unidirectional_bw_bytes_per_sec=int(1848e9),
@@ -147,6 +155,7 @@ class MachineSpec:
                     # 16 GiB HBM2e
                     mem_bandwidth_bytes_per_sec=int(410e9),
                     mem_capacity_bytes=16 * (1024**3),
+                    mamf=0.7,  # TODO. not sure, figure out empirically
                 ),
                 # NeuronLink v2
                 intra_node_connect=LinkSpec(

@@ -9,8 +9,6 @@ from dlcalc.utils.hardware import MachineSpec
 
 from .math import ceil_divide, product
 
-_ASSUMED_GEMM_UTIL = 0.7
-
 
 def compute_gemm_flops(n_tokens: int, weight_shape: tuple[int, ...]) -> float:
     """compute the number of FLOPs in a linear layer. Given by 2MNK."""
@@ -27,7 +25,7 @@ def gemm_time_s(
         n_tokens=n_tokens,
         weight_shape=weight_repr.shape(partitioned=True),
     )
-    return flops / (machine_spec.device_spec.peak_flops * _ASSUMED_GEMM_UTIL)
+    return flops / (machine_spec.device_spec.peak_flops * machine_spec.device_spec.mamf)
 
 
 def expert_gemm_time_s(
@@ -41,7 +39,7 @@ def expert_gemm_time_s(
         n_tokens=n_tokens_per_expert,
         weight_shape=tuple(gemm_dims),
     )
-    return flops / (machine_spec.device_spec.peak_flops * _ASSUMED_GEMM_UTIL)
+    return flops / (machine_spec.device_spec.peak_flops * machine_spec.device_spec.mamf)
 
 
 def compute_gemm_n_tiles(
@@ -83,5 +81,5 @@ def sdpa_time_s(
                 2 * ctxlen * head_dim,  # A @ V
             ]
         )
-        / (machine_spec.device_spec.peak_flops * _ASSUMED_GEMM_UTIL)
+        / (machine_spec.device_spec.peak_flops * machine_spec.device_spec.mamf)
     )
