@@ -837,6 +837,25 @@ def main() -> None:
     )
     pipeline_bubble_time = transformer_block_time * pipeline_bubble_fraction
 
+    embedding_lookup_fwd_time_s = (
+        model_repr.vocab_sz
+        * hidden_sz
+        * safe_divide(model_repr.bits_per_parameter, 8)
+        / machine_spec.device_spec.mem_bandwidth_bytes_per_sec
+    )
+    embedding_lookup_time_per_microbatch = 2 * embedding_lookup_fwd_time_s
+    embedding_total_time = embedding_lookup_time_per_microbatch * n_microbatches_per_mp_rank
+
+    # LM head projection (GEMM operation)
+    lm_head_fwd_time_s = gemm_time_s(
+        n_tokens=microbatch_sz * sequence_len,
+        weight_repr=model_repr.embed_weight,
+        machine_spec=machine_spec,
+    )
+    lm_head_bwd_time_s = 2 * lm_head_fwd_time_s
+    lm_head_time_per_microbatch = lm_head_fwd_time_s + lm_head_bwd_time_s
+    lm_head_total_time = lm_head_time_per_microbatch * n_microbatches_per_mp_rank
+
     # approximation: we'll assume all reductions are overlapped
     # except for at the first pipeline stage, where they are completely exposed.
     # Generally, for large training jobs where microbatch size is 1
@@ -866,6 +885,8 @@ def main() -> None:
     iteration_time_components: dict[str, float] = OrderedDict(
         {
             "Transformer Block": transformer_block_time,
+            "Embedding Lookup": embedding_total_time,
+            "LM Head Projection": lm_head_total_time,
             "DP All-Gather": dp_ag_time,
             "DP Reduce-Scatter": dp_rs_time,
             "Pipeline Bubble": pipeline_bubble_time,
