@@ -239,25 +239,32 @@ def main() -> None:
 
     print()
     print_info("Activation Breakdown per Layer/Microbatch")
-    activation_breakdown = model_repr.activation_breakdown_per_microbatch_per_layer()
+    activation_breakdown = model_repr.activation_breakdown_per_microbatch_per_layer_detailed()
 
     # Calculate max sizes for better alignment
     max_name_len = max(len(name) for name in activation_breakdown.keys())
-    total_numel = sum(activation_breakdown.values())
+    max_abstract_shape_len = max(
+        len(activation_info.abstract_shape) for activation_info in activation_breakdown.values()
+    )
+    max_shape_len = max(
+        len(activation_info.shape) for activation_info in activation_breakdown.values()
+    )
+    total_numel = sum(activation_info.numel for activation_info in activation_breakdown.values())
     total_size_mib = (total_numel * model_repr.bits_per_parameter // 8) / (1024**2)
 
-    for name, numel in activation_breakdown.items():
+    for name, activation_info in activation_breakdown.items():
+        numel = activation_info.numel
         size_mib = (numel * model_repr.bits_per_parameter // 8) / (1024**2)
         percentage = (numel / total_numel) * 100
         bar_width = int(percentage / 2)  # Scale to fit in terminal
         bar = "█" * bar_width if bar_width > 0 else ""
         color = get_color_for_component_percentage(percentage)
         print(
-            f"    {name:<{max_name_len}} │ {numel:>12,} │ {size_mib:>8.1f} MiB │ {color} {percentage:>5.1f}% {bar}{_END}"
+            f"    {name:<{max_name_len}} │ {activation_info.abstract_shape:<{max_abstract_shape_len}} │ {activation_info.shape:<{max_shape_len}} │ {numel:>12,} │ {size_mib:>8.1f} MiB │ {color} {percentage:>5.1f}% {bar}{_END}"
         )
-    print(f"  {'─' * (max_name_len + 45)}")
+    print(f"  {'─' * (max_name_len + max_abstract_shape_len + max_shape_len + 51)}")
     print(
-        f"{_BOLD}    {'TOTAL':<{max_name_len}} │ {total_numel:>12,} │ {total_size_mib:>8.1f} MiB {_END}"
+        f"{_BOLD}    {'TOTAL':<{max_name_len}} │ {'':<{max_abstract_shape_len}} │ {'':<{max_shape_len}} │ {total_numel:>12,} │ {total_size_mib:>8.1f} MiB {_END}"
     )
 
     print_section_separator()

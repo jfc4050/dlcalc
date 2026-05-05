@@ -144,6 +144,13 @@ class MoeCfg:
     expert_tp_degree: int
 
 
+@dataclasses.dataclass(frozen=True)
+class ActivationInfo:
+    numel: int
+    shape: str
+    abstract_shape: str
+
+
 @dataclasses.dataclass
 class ThreeDParallelModel:
     """Representation of a 3D parallel transformer model."""
@@ -364,7 +371,14 @@ class ThreeDParallelModel:
 
     def activation_breakdown_per_microbatch_per_layer(self) -> dict[str, int]:
         """Returns dictionary of activation name to numel for a single microbatch per layer."""
-        return self.__activation_numel_per_microbatch_per_layer()
+        return {
+            name: activation_info.numel
+            for name, activation_info in self.activation_breakdown_per_microbatch_per_layer_detailed().items()
+        }
+
+    def activation_breakdown_per_microbatch_per_layer_detailed(self) -> dict[str, ActivationInfo]:
+        """Returns activation details for a single microbatch per layer."""
+        return self.__activation_info_per_microbatch_per_layer()
 
     def vpp_penalty(self) -> float:
         """interleaved schedule requires storing activations for (1 + (p - 1)/pm)
@@ -482,6 +496,12 @@ class ThreeDParallelModel:
         return n_layers
 
     def __activation_numel_per_microbatch_per_layer(self) -> dict[str, int]:
+        return {
+            name: activation_info.numel
+            for name, activation_info in self.__activation_info_per_microbatch_per_layer().items()
+        }
+
+    def __activation_info_per_microbatch_per_layer(self) -> dict[str, ActivationInfo]:
         """
         See: Reducing Activation Recomputation in Large Transformer Models
         https://arxiv.org/pdf/2205.05198.pdf
@@ -503,8 +523,40 @@ class ThreeDParallelModel:
             self.expert_capacity() * self.moe_cfg.expert_inter_sz if self.moe_cfg is not None else 0
         )
 
+        seq_cp = safe_divide(self.sequence_len, self.parallelism_cfg.cp)
+        hidden_sp = self.__sp_hidden_dim()
+        query_heads_tp = safe_divide(self.n_q_heads, self.parallelism_cfg.tp)
+        kv_heads_tp = safe_divide(self.n_kv_heads, self.parallelism_cfg.tp)
+        inter_tp = safe_divide(self.inter_sz, self.parallelism_cfg.tp)
+        gate_inter_tp = safe_divide(
+            2 * self.inter_sz if self.glu else self.inter_sz, self.parallelism_cfg.tp
+        )
+
+        def activation_info(
+            numel: int,
+            shape: tuple[int, ...],
+            abstract_shape: tuple[str, ...],
+            packed: bool = False,
+        ) -> ActivationInfo:
+            shape_str = str(shape)
+            abstract_shape_str = f"({', '.join(abstract_shape)})"
+            if packed:
+                shape_str = f"{shape_str} (packed mask)"
+                abstract_shape_str = f"{abstract_shape_str} (packed mask)"
+            return ActivationInfo(numel=numel, shape=shape_str, abstract_shape=abstract_shape_str)
+
         if self.act_ckpting_type == ActivationCheckpointingType.FULL:
-            return {"Block Input": self.__sp_partition_if_on(sbh)}
+            return {
+                "Block Input": activation_info(
+                    numel=self.__sp_partition_if_on(sbh),
+                    shape=(seq_cp, self.microbatch_sz, hidden_sp),
+                    abstract_shape=(
+                        "s/cp",
+                        "b",
+                        "h" if not self.parallelism_cfg.sp_enabled else "h/tp",
+                    ),
+                )
+            }
         elif self.act_ckpting_type in (
             ActivationCheckpointingType.NONE,
             ActivationCheckpointingType.SELECTIVE,  # basically obsolete w/ flash attention
@@ -512,30 +564,99 @@ class ThreeDParallelModel:
         ):
             return {
                 # LAYERNORM 1
-                "Pre Attn Norm": self.__deallocate_for_ssc(self.__sp_partition_if_on(sbh)),
+                "Pre Attn Norm": activation_info(
+                    numel=self.__deallocate_for_ssc(self.__sp_partition_if_on(sbh)),
+                    shape=(seq_cp, self.microbatch_sz, hidden_sp),
+                    abstract_shape=(
+                        "s/cp",
+                        "b",
+                        "h" if not self.parallelism_cfg.sp_enabled else "h/tp",
+                    ),
+                ),
                 # QKV PROJ (col parallel linear)
-                "Query": self.__tp_partition(sbq),
-                "Key": self.__tp_partition(sbk),
-                "Value": self.__tp_partition(sbv),
+                "Query": activation_info(
+                    numel=self.__tp_partition(sbq),
+                    shape=(seq_cp, self.microbatch_sz, query_heads_tp, self.head_dim),
+                    abstract_shape=("s/cp", "b", "q/tp", "d"),
+                ),
+                "Key": activation_info(
+                    numel=self.__tp_partition(sbk),
+                    shape=(seq_cp, self.microbatch_sz, kv_heads_tp, self.head_dim),
+                    abstract_shape=("s/cp", "b", "kv/tp", "d"),
+                ),
+                "Value": activation_info(
+                    numel=self.__tp_partition(sbv),
+                    shape=(seq_cp, self.microbatch_sz, kv_heads_tp, self.head_dim),
+                    abstract_shape=("s/cp", "b", "kv/tp", "d"),
+                ),
                 # ROTARY EMBEDDINGS
-                "Query Rotary": self.__tp_partition(sbq) if self.rotary_embed else 0,
-                "Key Rotary": self.__tp_partition(sbk) if self.rotary_embed else 0,
+                "Query Rotary": activation_info(
+                    numel=self.__tp_partition(sbq) if self.rotary_embed else 0,
+                    shape=(seq_cp, self.microbatch_sz, query_heads_tp, self.head_dim),
+                    abstract_shape=("s/cp", "b", "q/tp", "d"),
+                ),
+                "Key Rotary": activation_info(
+                    numel=self.__tp_partition(sbk) if self.rotary_embed else 0,
+                    shape=(seq_cp, self.microbatch_sz, kv_heads_tp, self.head_dim),
+                    abstract_shape=("s/cp", "b", "kv/tp", "d"),
+                ),
                 # SELF ATTENTION
-                "Attention Output": self.__tp_partition(sbh),
+                "Attention Output": activation_info(
+                    numel=self.__tp_partition(sbh),
+                    shape=(
+                        seq_cp,
+                        self.microbatch_sz,
+                        safe_divide(self.hidden_sz, self.parallelism_cfg.tp),
+                    ),
+                    abstract_shape=("s/cp", "b", "h/tp"),
+                ),
                 # DROPOUT
-                "Post Attention Dropout Mask": self.__deallocate_for_ssc(
-                    self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0
+                "Post Attention Dropout Mask": activation_info(
+                    numel=self.__deallocate_for_ssc(
+                        self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0
+                    ),
+                    shape=(seq_cp, self.microbatch_sz, hidden_sp),
+                    abstract_shape=(
+                        "s/cp",
+                        "b",
+                        "h" if not self.parallelism_cfg.sp_enabled else "h/tp",
+                    ),
+                    packed=self.dropout,
                 ),
                 # RESIDUAL
-                "Post Attention Residual": self.__sp_partition_if_on(sbh),
+                "Post Attention Residual": activation_info(
+                    numel=self.__sp_partition_if_on(sbh),
+                    shape=(seq_cp, self.microbatch_sz, hidden_sp),
+                    abstract_shape=(
+                        "s/cp",
+                        "b",
+                        "h" if not self.parallelism_cfg.sp_enabled else "h/tp",
+                    ),
+                ),
                 # LAYERNORM 2
-                "Pre MLP Norm": self.__sp_partition_if_on(sbh),
+                "Pre MLP Norm": activation_info(
+                    numel=self.__sp_partition_if_on(sbh),
+                    shape=(seq_cp, self.microbatch_sz, hidden_sp),
+                    abstract_shape=(
+                        "s/cp",
+                        "b",
+                        "h" if not self.parallelism_cfg.sp_enabled else "h/tp",
+                    ),
+                ),
                 # Permuted Input
                 **(
                     {}
                     if not is_moe
                     else {
-                        "Permuted Input": moe_n_local_experts * self.__expert_tp_partition(moe_nh)
+                        "Permuted Input": activation_info(
+                            numel=moe_n_local_experts * self.__expert_tp_partition(moe_nh),
+                            shape=(
+                                moe_n_local_experts,
+                                self.expert_capacity(),
+                                self.__expert_hidden_dim(),
+                            ),
+                            abstract_shape=("e/ep", "ec", "h/etp"),
+                        )
                     }
                 ),
                 # MLP Input (EP)
@@ -543,45 +664,148 @@ class ThreeDParallelModel:
                     {}
                     if not is_moe
                     else {
-                        "MLP Input (EP)": moe_n_local_experts * self.__expert_tp_partition(moe_nh)
+                        "MLP Input (EP)": activation_info(
+                            numel=moe_n_local_experts * self.__expert_tp_partition(moe_nh),
+                            shape=(
+                                moe_n_local_experts,
+                                self.expert_capacity(),
+                                self.__expert_hidden_dim(),
+                            ),
+                            abstract_shape=("e/ep", "ec", "h/etp"),
+                        )
                     }
                 ),
                 # MLP UP/GATE (col parallel linear)
-                "Up/Gate": (
-                    self.__tp_partition(2 * sbi if self.glu else sbi)
-                    if not is_moe
-                    else moe_n_local_experts
-                    * self.__expert_tp_partition(2 * moe_ni if self.glu else moe_ni)
+                "Up/Gate": activation_info(
+                    numel=(
+                        self.__tp_partition(2 * sbi if self.glu else sbi)
+                        if not is_moe
+                        else moe_n_local_experts
+                        * self.__expert_tp_partition(2 * moe_ni if self.glu else moe_ni)
+                    ),
+                    shape=(
+                        (seq_cp, self.microbatch_sz, gate_inter_tp)
+                        if not is_moe
+                        else (
+                            moe_n_local_experts,
+                            self.expert_capacity(),
+                            self.__expert_intermediate_dim(gated=True),
+                        )
+                    ),
+                    abstract_shape=(
+                        ("s/cp", "b", "2i/tp" if self.glu else "i/tp")
+                        if not is_moe
+                        else (
+                            "e/ep",
+                            "ec",
+                            "2ei/etp" if self.glu else "ei/etp",
+                        )
+                    ),
                 ),
                 # SwiGLU
-                "SiLU": self.__deallocate_for_ssc(
-                    self.__tp_partition(sbi)
-                    if not is_moe
-                    else moe_n_local_experts * self.__expert_tp_partition(moe_ni)
+                "SiLU": activation_info(
+                    numel=(
+                        self.__deallocate_for_ssc(self.__tp_partition(sbi))
+                        if not is_moe
+                        else self.__deallocate_for_ssc(
+                            moe_n_local_experts * self.__expert_tp_partition(moe_ni)
+                        )
+                    ),
+                    shape=(
+                        (seq_cp, self.microbatch_sz, inter_tp)
+                        if not is_moe
+                        else (
+                            moe_n_local_experts,
+                            self.expert_capacity(),
+                            self.__expert_intermediate_dim(gated=False),
+                        )
+                    ),
+                    abstract_shape=(
+                        ("s/cp", "b", "i/tp") if not is_moe else ("e/ep", "ec", "ei/etp")
+                    ),
                 ),
-                "Gate": self.__deallocate_for_ssc(
-                    self.__tp_partition(sbi)
-                    if not is_moe
-                    else moe_n_local_experts * self.__expert_tp_partition(moe_ni)
+                "Gate": activation_info(
+                    numel=(
+                        self.__deallocate_for_ssc(self.__tp_partition(sbi))
+                        if not is_moe
+                        else self.__deallocate_for_ssc(
+                            moe_n_local_experts * self.__expert_tp_partition(moe_ni)
+                        )
+                    ),
+                    shape=(
+                        (seq_cp, self.microbatch_sz, inter_tp)
+                        if not is_moe
+                        else (
+                            moe_n_local_experts,
+                            self.expert_capacity(),
+                            self.__expert_intermediate_dim(gated=False),
+                        )
+                    ),
+                    abstract_shape=(
+                        ("s/cp", "b", "i/tp") if not is_moe else ("e/ep", "ec", "ei/etp")
+                    ),
                 ),
                 # Unpermuted Input
                 **(
                     {}
                     if not is_moe
                     else {
-                        "Unpermuted Output": moe_n_local_experts
-                        * self.__expert_tp_partition(moe_nh)
+                        "Unpermuted Output": activation_info(
+                            numel=moe_n_local_experts * self.__expert_tp_partition(moe_nh),
+                            shape=(
+                                moe_n_local_experts,
+                                self.expert_capacity(),
+                                self.__expert_hidden_dim(),
+                            ),
+                            abstract_shape=("e/ep", "ec", "h/etp"),
+                        )
                     }
                 ),
                 # DROPOUT
-                "Post MLP Dropout Mask": self.__deallocate_for_ssc(
-                    self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0
+                "Post MLP Dropout Mask": activation_info(
+                    numel=self.__deallocate_for_ssc(
+                        self.__sp_partition_if_on(int(0.5 * sbh)) if self.dropout else 0
+                    ),
+                    shape=(seq_cp, self.microbatch_sz, hidden_sp),
+                    abstract_shape=(
+                        "s/cp",
+                        "b",
+                        "h" if not self.parallelism_cfg.sp_enabled else "h/tp",
+                    ),
+                    packed=self.dropout,
                 ),
                 # RESIDUAL
-                "Post MLP Residual": self.__sp_partition_if_on(sbh),
+                "Post MLP Residual": activation_info(
+                    numel=self.__sp_partition_if_on(sbh),
+                    shape=(seq_cp, self.microbatch_sz, hidden_sp),
+                    abstract_shape=(
+                        "s/cp",
+                        "b",
+                        "h" if not self.parallelism_cfg.sp_enabled else "h/tp",
+                    ),
+                ),
             }
         else:
             raise ValueError(f"unhandled checkpointing_type={self.act_ckpting_type}")
+
+    def __sp_hidden_dim(self) -> int:
+        if self.parallelism_cfg.sp_enabled:
+            return safe_divide(self.hidden_sz, self.parallelism_cfg.tp)
+        return self.hidden_sz
+
+    def __expert_hidden_dim(self) -> int:
+        assert self.parallelism_cfg.expert_mesh is not None
+        return safe_divide(self.hidden_sz, self.parallelism_cfg.expert_mesh.tp)
+
+    def __expert_intermediate_dim(self, gated: bool) -> int:
+        assert self.moe_cfg is not None
+        assert self.parallelism_cfg.expert_mesh is not None
+        inter_dim = (
+            (2 * self.moe_cfg.expert_inter_sz)
+            if gated and self.glu
+            else self.moe_cfg.expert_inter_sz
+        )
+        return safe_divide(inter_dim, self.parallelism_cfg.expert_mesh.tp)
 
     def __tp_partition(self, unpartitoned_numel: int) -> int:
         x = unpartitoned_numel
