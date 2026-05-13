@@ -856,9 +856,7 @@ def main() -> None:
 
     # LM head projection (GEMM operation)
     lm_head_fwd_time_s = gemm_time_s(
-        n_tokens=microbatch_sz * sequence_len,
-        weight_repr=model_repr.embed_weight,
-        machine_spec=machine_spec,
+        n_tokens=tp_region_n_tokens, weight_repr=model_repr.embed_weight, machine_spec=machine_spec
     )
     lm_head_bwd_time_s = 2 * lm_head_fwd_time_s
     lm_head_time_per_microbatch = lm_head_fwd_time_s + lm_head_bwd_time_s
