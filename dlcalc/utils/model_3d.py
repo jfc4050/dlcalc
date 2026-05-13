@@ -1,4 +1,5 @@
 import dataclasses
+import math
 from enum import Enum
 
 from .configurations import ActivationCheckpointingType
@@ -853,4 +854,4 @@ class ThreeDParallelModel:
             self.parallelism_cfg.expert_mesh.dp,
         )
 
-        return safe_divide(n_expert_region_tokens_partitioned, self.moe_cfg.n_experts)
+        return int(math.ceil(n_expert_region_tokens_partitioned / self.moe_cfg.n_experts))
