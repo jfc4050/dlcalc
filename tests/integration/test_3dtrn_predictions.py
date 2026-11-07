@@ -296,6 +296,24 @@ def test_cross_dc_output_format() -> None:
         Path(config_path).unlink()
 
 
+@pytest.mark.parametrize(  # type: ignore[misc]
+    "node_type", ["p5e.48xlarge", "p6-b300.48xlarge", "g7e.48xlarge", "trn2.48xlarge"]
+)
+def test_new_node_types_run_end_to_end(node_type: str) -> None:
+    """Each new node type should produce a sane MFU for the Llama3-70B example."""
+    with open("examples/llama3_70b.yaml") as f:
+        cfg = yaml.safe_load(f)
+    cfg["hardware"]["node_type"] = node_type
+
+    with NamedTemporaryFile(mode="w", suffix=".yaml") as tmp:
+        yaml.safe_dump(cfg, tmp)
+        tmp.flush()
+        mfu, mem, _ = _run_3dtrn(tmp.name)
+
+    assert 0 < mfu < 100
+    assert mem > 0
+
+
 def _run_3dtrn(config_file: str) -> tuple[float, float, str]:
     """Run 3dtrn and extract MFU and total memory values from output.
 
