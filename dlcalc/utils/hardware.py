@@ -107,6 +107,29 @@ class MachineSpec:
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
+            # H200 datasheet: https://www.nvidia.com/en-us/data-center/h200/
+            # https://aws.amazon.com/ec2/instance-types/p5/
+            "p5e.48xlarge": MachineSpec(
+                n_devices=8,
+                # H200 SXM
+                device_spec=DeviceSpec(
+                    peak_flops=int(989e12),  # (ignore sparsity numbers)
+                    # 141GB HBM3e
+                    mem_bandwidth_bytes_per_sec=int(4800e9),
+                    mem_capacity_bytes=141 * (1024**3),
+                    mamf=0.859,
+                ),
+                # NVLink 4
+                intra_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(450e9),
+                    latency_sec=3e-6,
+                ),
+                # EFA v2 - 3200 Gbps
+                inter_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(400e9 / 8),
+                    latency_sec=EFA_LATENCY_S,
+                ),
+            ),
             "p6-b200.48xlarge": MachineSpec(
                 n_devices=8,
                 device_spec=DeviceSpec(
@@ -128,6 +151,29 @@ class MachineSpec:
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
+            # B300 bandwidth: https://developer.nvidia.com/blog/inside-nvidia-blackwell-ultra-the-chip-powering-the-ai-factory-era/
+            # HGX B300 (BF16 dense is 1/2 the listed sparse spec): https://www.nvidia.com/en-us/data-center/hgx/
+            # https://aws.amazon.com/ec2/instance-types/p6/
+            "p6-b300.48xlarge": MachineSpec(
+                n_devices=8,
+                device_spec=DeviceSpec(
+                    peak_flops=int(2250e12),
+                    # 288GB HBM3e, 2144GB per instance visible on AWS
+                    mem_bandwidth_bytes_per_sec=int(8000e9),
+                    mem_capacity_bytes=268 * (1024**3),
+                    mamf=0.841,
+                ),
+                # NVLink 5
+                intra_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(900e9),
+                    latency_sec=3e-6,  # TODO.
+                ),
+                # EFAv4 - 6400 Gbps
+                inter_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(800e9 / 8),
+                    latency_sec=EFA_LATENCY_S,
+                ),
+            ),
             "u-p6e-gb300x72": MachineSpec(
                 n_devices=72,
                 device_spec=DeviceSpec(
@@ -142,6 +188,29 @@ class MachineSpec:
                 ),
                 inter_node_connect=LinkSpec(
                     unidirectional_bw_bytes_per_sec=int(800e9 / 8),
+                    latency_sec=EFA_LATENCY_S,
+                ),
+            ),
+            # RTX PRO 6000 datasheet: https://www.nvidia.com/en-us/data-center/rtx-pro-6000-blackwell-server-edition/
+            # https://aws.amazon.com/ec2/instance-types/g7e/
+            "g7e.48xlarge": MachineSpec(
+                n_devices=8,
+                # RTX PRO 6000 Blackwell Server Edition
+                device_spec=DeviceSpec(
+                    peak_flops=int(500e12),  # 1 PFLOP listed is with sparsity
+                    # 96GB GDDR7
+                    mem_bandwidth_bytes_per_sec=int(1597e9),
+                    mem_capacity_bytes=96 * (1024**3),
+                    mamf=0.7,  # TODO. not in MAMF tables, measure empirically
+                ),
+                # no NVLink, GPUDirect P2P over PCIe Gen5 x16
+                intra_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(64e9),
+                    latency_sec=3e-6,  # TODO. placeholder copied from NVLink
+                ),
+                # EFAv4 - 1600 Gbps
+                inter_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(200e9 / 8),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
@@ -165,6 +234,31 @@ class MachineSpec:
                 # EFA v2
                 inter_node_connect=LinkSpec(
                     unidirectional_bw_bytes_per_sec=int(200e9 / 32),
+                    latency_sec=EFA_LATENCY_S,
+                ),
+            ),
+            # https://awsdocs-neuron.readthedocs-hosted.com/en/latest/about-neuron/arch/neuron-hardware/trn2-arch.html
+            "trn2.48xlarge": MachineSpec(
+                # 16 Trainium2 chips x 4 logical NeuronCores at the default LNC=2.
+                # Like trn1n, treating (logical) neuron cores as devices.
+                n_devices=64,
+                device_spec=DeviceSpec(
+                    # 10.7 PFLOPS BF16 dense per instance
+                    peak_flops=int(10.7e15 / 64),
+                    # 96 GiB HBM per chip, 46.4 TB/s per instance
+                    mem_bandwidth_bytes_per_sec=int(46.4e12 / 64),
+                    mem_capacity_bytes=24 * (1024**3),
+                    mamf=0.7,  # TODO. not sure, figure out empirically
+                ),
+                # NeuronLink v3 - 1024 GiB/s per chip
+                intra_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=256 * (1024**3),
+                    # TODO. placeholder copied from NVLink, figure out empirically
+                    latency_sec=3e-6,
+                ),
+                # EFA v3 - 3200 Gbps
+                inter_node_connect=LinkSpec(
+                    unidirectional_bw_bytes_per_sec=int(400e9 / 64),
                     latency_sec=EFA_LATENCY_S,
                 ),
             ),
